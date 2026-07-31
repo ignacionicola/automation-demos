@@ -1,0 +1,11 @@
+{
+  "name": "content-automation-demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Custom Node.js code for the Content Automation demo.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"no tests yet\" && exit 0"
+  },
+  "license": "MIT"
+}

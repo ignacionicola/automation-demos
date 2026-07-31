@@ -1,0 +1,11 @@
+{
+  "name": "02 - E-commerce Pipeline (placeholder)",
+  "nodes": [],
+  "connections": {},
+  "active": false,
+  "settings": {},
+  "meta": {
+    "status": "placeholder",
+    "note": "This is a scaffold placeholder. The real workflow has not been implemented yet."
+  }
+}
