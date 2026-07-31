@@ -32,7 +32,7 @@ flowchart TD
 
 ## Requirements
 
-- n8n (self-hosted or cloud) — v1.x
+- n8n (self-hosted or cloud) — v2.x
 - Node.js — v18+
 - Access to the data sources being reported on (database connection, API keys, Google Sheets)
 - A PDF/Excel generation library (e.g. `exceljs`, `pdfkit`) used by the custom code

@@ -33,7 +33,7 @@ flowchart TD
 
 ## Requirements
 
-- n8n (self-hosted or cloud) — v1.x
+- n8n (self-hosted or cloud) — v2.x
 - Node.js — v18+
 - E-commerce platform API access (Shopify Admin API, WooCommerce REST API, or similar)
 - Shipping provider API (if automating label/shipment creation)

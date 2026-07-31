@@ -30,7 +30,7 @@ flowchart TD
 
 ## Requirements
 
-- n8n (self-hosted or cloud) — v1.x
+- n8n (self-hosted or cloud) — v2.x
 - Node.js — v18+
 - An LLM API key (e.g. Claude) for copy generation
 - Social platform API access (e.g. LinkedIn, Twitter/X, Buffer) for publishing

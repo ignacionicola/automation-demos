@@ -1,11 +1,16 @@
 {
   "name": "whatsapp-agent-demo",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "Custom Node.js code for the WhatsApp Agent automation demo.",
-  "main": "index.js",
+  "description": "Lógica custom en Node.js del agente de WhatsApp para inmobiliaria (demo 01). Se inyecta en los Code nodes de workflow.json.",
+  "main": "src/matchProperties.js",
   "scripts": {
-    "test": "echo \"no tests yet\" && exit 0"
+    "test": "node --test \"test/*.test.js\"",
+    "build:workflow": "node scripts/build-workflow.js",
+    "check:workflow": "node scripts/build-workflow.js --check"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "license": "MIT"
 }

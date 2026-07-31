@@ -26,5 +26,8 @@ Thumbs.db
 .idea/
 *.swp
 
+# Machine-local Claude Code settings (the shared skill in .claude/skills is committed)
+.claude/settings.local.json
+
 # n8n local data (if run locally via CLI)
 .n8n/
