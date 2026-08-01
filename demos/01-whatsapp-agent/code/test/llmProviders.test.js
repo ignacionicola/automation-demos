@@ -4,6 +4,7 @@ const assert = require('node:assert');
 const {
   buildLlmRequest,
   extractLlmText,
+  esquemaClasificacionGemini,
   MODELOS_POR_DEFECTO,
   PROVEEDOR_POR_DEFECTO,
 } = require('../src/llmProviders');
@@ -26,6 +27,39 @@ test('buildLlmRequest arma la URL de Gemini con el modelo embebido', () => {
   assert.strictEqual(body.contents[0].role, 'user');
   assert.strictEqual(body.contents[0].parts[0].text, PROMPT_BASE.mensajeUsuario);
   assert.strictEqual(body.generationConfig.temperature, 0);
+});
+
+test('buildLlmRequest apaga el thinking de Gemini y sube el presupuesto de tokens', () => {
+  // gemini-flash-latest es un modelo "thinking": sin thinkingBudget: 0, el
+  // razonamiento se come maxOutputTokens y el JSON sale cortado a mitad
+  // (esto pasó de verdad con maxOutputTokens: 400 al armar esta demo).
+  const { body } = buildLlmRequest({ proveedor: 'gemini', ...PROMPT_BASE });
+
+  assert.deepStrictEqual(body.generationConfig.thinkingConfig, { thinkingBudget: 0 });
+  assert.strictEqual(body.generationConfig.maxOutputTokens, 1500);
+});
+
+test('buildLlmRequest pide JSON estructurado garantizado por schema para Gemini', () => {
+  const { body } = buildLlmRequest({ proveedor: 'gemini', ...PROMPT_BASE });
+
+  assert.strictEqual(body.generationConfig.responseMimeType, 'application/json');
+  assert.deepStrictEqual(body.generationConfig.responseSchema, esquemaClasificacionGemini());
+});
+
+test('el schema de clasificación de Gemini usa tipos en mayúscula (protobuf Type, no JSON Schema)', () => {
+  const schema = esquemaClasificacionGemini();
+
+  assert.strictEqual(schema.type, 'OBJECT');
+  assert.strictEqual(schema.properties.intent.type, 'STRING');
+  assert.deepStrictEqual(schema.properties.intent.enum, [
+    'consulta_propiedad',
+    'agendar_visita',
+    'consulta_general',
+    'derivar_humano',
+  ]);
+  assert.strictEqual(schema.properties.confianza.type, 'NUMBER');
+  assert.strictEqual(schema.properties.entidades.properties.dormitorios.nullable, true);
+  assert.deepStrictEqual(schema.required, ['intent', 'confianza', 'entidades']);
 });
 
 test('buildLlmRequest arma el body de Anthropic con el header de versión', () => {

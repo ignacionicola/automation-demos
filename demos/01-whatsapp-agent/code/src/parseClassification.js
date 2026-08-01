@@ -8,6 +8,14 @@ const { extractLlmText } = require('./llmProviders');
 const INTENTS_VALIDOS = ['consulta_propiedad', 'agendar_visita', 'consulta_general', 'derivar_humano'];
 const CONFIANZA_MINIMA = 0.6;
 
+// Tope para no volcar respuestas gigantes al log ni al item de n8n.
+const LARGO_MAXIMO_DEBUG = 4000;
+
+function truncar(texto) {
+  if (typeof texto !== 'string') return texto;
+  return texto.length > LARGO_MAXIMO_DEBUG ? texto.slice(0, LARGO_MAXIMO_DEBUG) + '… (truncado)' : texto;
+}
+
 function extraerJson(texto) {
   if (typeof texto !== 'string') return null;
   // Por las dudas el modelo lo envuelva en un bloque de markdown.
@@ -24,7 +32,7 @@ function extraerJson(texto) {
 
 /**
  * @param {object} opciones { proveedor, respuestaCruda, mensajeVacio }
- * @returns {{intent: string, confianza: number, entidades: object, motivoDerivacion: string|null}}
+ * @returns {{intent: string, confianza: number, entidades: object, motivoDerivacion: string|null, textoCrudo: string|null}}
  */
 function parseClassification(opciones) {
   const datos = opciones || {};
@@ -34,11 +42,16 @@ function parseClassification(opciones) {
   let intent = parseado ? parseado.intent : null;
   let confianza = parseado && typeof parseado.confianza === 'number' ? parseado.confianza : 0;
   let motivoDerivacion = null;
+  // Solo se llena cuando el JSON no se pudo interpretar: es lo único que hace
+  // falta ver para debuggear (el prompt y la config ya quedan en los nodos
+  // anteriores). null en el resto de los casos para no inflar cada item.
+  let textoCrudo = null;
 
   if (!parseado) {
     intent = 'derivar_humano';
     confianza = 0;
     motivoDerivacion = 'El clasificador devolvió una respuesta que no se pudo interpretar';
+    textoCrudo = truncar(texto === null || texto === undefined ? '(sin texto extraído de la respuesta)' : texto);
   } else if (!INTENTS_VALIDOS.includes(intent)) {
     motivoDerivacion = 'El clasificador devolvió un intent desconocido: ' + String(intent);
     intent = 'derivar_humano';
@@ -56,6 +69,7 @@ function parseClassification(opciones) {
     confianza,
     entidades: (parseado && parseado.entidades) || {},
     motivoDerivacion,
+    textoCrudo,
   };
 }
 

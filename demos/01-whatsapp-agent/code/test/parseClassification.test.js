@@ -66,6 +66,40 @@ test('deriva a un humano si el texto no es JSON parseable', () => {
   assert.match(resultado.motivoDerivacion, /no se pudo interpretar/);
 });
 
+// Este es el caso real que motivó agregar textoCrudo: una respuesta cortada a
+// mitad del JSON (Gemini se quedó sin presupuesto de tokens por el thinking).
+test('cuando el JSON viene truncado, guarda el texto crudo para debug', () => {
+  const cortada = {
+    candidates: [{ content: { parts: [{ text: '{"intent":"consulta_propiedad","entidades":{"barrio":"Nueva' }] } }],
+  };
+  const resultado = parseClassification({ proveedor: 'gemini', respuestaCruda: cortada, mensajeVacio: false });
+
+  assert.strictEqual(resultado.intent, 'derivar_humano');
+  assert.strictEqual(resultado.textoCrudo, '{"intent":"consulta_propiedad","entidades":{"barrio":"Nueva');
+});
+
+test('textoCrudo queda en null cuando la clasificación es válida', () => {
+  const resultado = parseClassification({
+    proveedor: 'gemini',
+    respuestaCruda: respuestaGemini(CLASIFICACION_VALIDA),
+    mensajeVacio: false,
+  });
+
+  assert.strictEqual(resultado.textoCrudo, null);
+});
+
+test('trunca el texto crudo si es demasiado largo', () => {
+  const textoGigante = 'x'.repeat(5000);
+  const resultado = parseClassification({
+    proveedor: 'gemini',
+    respuestaCruda: { candidates: [{ content: { parts: [{ text: textoGigante }] } }] },
+    mensajeVacio: false,
+  });
+
+  assert.ok(resultado.textoCrudo.length < textoGigante.length);
+  assert.match(resultado.textoCrudo, /… \(truncado\)$/);
+});
+
 test('deriva a un humano ante un intent fuera del whitelist', () => {
   const resultado = parseClassification({
     proveedor: 'anthropic',

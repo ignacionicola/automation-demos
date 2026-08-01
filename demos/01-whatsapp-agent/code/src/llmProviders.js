@@ -25,6 +25,61 @@ function normalizarProveedor(proveedor) {
   return String(proveedor || PROVEEDOR_POR_DEFECTO).toLowerCase().trim();
 }
 
+// Schema OpenAPI-subset que espera Gemini en generationConfig.responseSchema.
+// A diferencia del JSON Schema estándar, los "type" van en MAYÚSCULA (es el
+// enum Type del proto de Gemini, no el responseJsonSchema más nuevo que sí
+// acepta minúsculas). Con esto Gemini garantiza la forma del JSON de salida
+// en vez de dejarla librada al prompt.
+//
+// Nota: los 4 intents están repetidos acá (no importados de
+// parseClassification.js) a propósito. Ambos módulos se inyectan juntos en
+// el mismo Code node ("Parse Classification" en build-workflow.js), así que
+// declarar una segunda constante con el mismo nombre en el mismo scope
+// rompería la compilación — ver INTENTS_VALIDOS en parseClassification.js.
+function campoStringOpcional() {
+  return { type: 'STRING', nullable: true };
+}
+
+function esquemaClasificacionGemini() {
+  return {
+    type: 'OBJECT',
+    properties: {
+      intent: {
+        type: 'STRING',
+        enum: ['consulta_propiedad', 'agendar_visita', 'consulta_general', 'derivar_humano'],
+      },
+      confianza: { type: 'NUMBER' },
+      entidades: {
+        type: 'OBJECT',
+        properties: {
+          operacion: campoStringOpcional(),
+          tipo: campoStringOpcional(),
+          barrio: campoStringOpcional(),
+          dormitorios: { type: 'INTEGER', nullable: true },
+          presupuesto: { type: 'NUMBER', nullable: true },
+          moneda: campoStringOpcional(),
+          fecha_visita: campoStringOpcional(),
+          hora_visita: campoStringOpcional(),
+          referencia_propiedad: campoStringOpcional(),
+        },
+        propertyOrdering: [
+          'operacion',
+          'tipo',
+          'barrio',
+          'dormitorios',
+          'presupuesto',
+          'moneda',
+          'fecha_visita',
+          'hora_visita',
+          'referencia_propiedad',
+        ],
+      },
+    },
+    required: ['intent', 'confianza', 'entidades'],
+    propertyOrdering: ['intent', 'confianza', 'entidades'],
+  };
+}
+
 function urlPorDefecto(proveedor, modelo) {
   if (proveedor === 'gemini') {
     return `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`;
@@ -63,7 +118,18 @@ function buildLlmRequest(opciones) {
       body: {
         system_instruction: { parts: [{ text: promptSistema }] },
         contents: [{ role: 'user', parts: [{ text: mensajeUsuario }] }],
-        generationConfig: { temperature: 0, maxOutputTokens: 400 },
+        generationConfig: {
+          temperature: 0,
+          // gemini-flash-latest es un modelo "thinking": sin este límite, los
+          // tokens de razonamiento se comen el presupuesto y la respuesta
+          // sale cortada a mitad del JSON (nos pasó con maxOutputTokens: 400
+          // armando esta demo). thinkingBudget: 0 lo apaga del todo.
+          thinkingConfig: { thinkingBudget: 0 },
+          maxOutputTokens: 1500,
+          // JSON garantizado por schema, no "mejor esfuerzo" vía prompt.
+          responseMimeType: 'application/json',
+          responseSchema: esquemaClasificacionGemini(),
+        },
       },
     };
   }
@@ -137,4 +203,5 @@ module.exports = {
   MODELOS_POR_DEFECTO,
   buildLlmRequest,
   extractLlmText,
+  esquemaClasificacionGemini,
 };

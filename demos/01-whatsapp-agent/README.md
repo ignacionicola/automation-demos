@@ -225,13 +225,32 @@ credential's Name and Value (or save a second credential and re-select it on
 
 ### Example request bodies
 
-**Gemini** — system instruction is a separate field, entities go in `contents`:
+**Gemini** — system instruction is a separate field, entities go in
+`contents`. Thinking is explicitly disabled (`thinkingBudget: 0`) since
+`gemini-flash-latest` is a reasoning model and reasoning tokens otherwise eat
+into `maxOutputTokens`, truncating the JSON before it closes. `responseSchema`
+makes the shape guaranteed rather than best-effort (full schema in
+`code/src/llmProviders.js#esquemaClasificacionGemini`, abbreviated here):
 
 ```json
 {
   "system_instruction": { "parts": [{ "text": "Sos el clasificador de mensajes de una inmobiliaria..." }] },
   "contents": [{ "role": "user", "parts": [{ "text": "Fecha de hoy: 2026-08-03\n\nMensaje del cliente:\nHola" }] }],
-  "generationConfig": { "temperature": 0, "maxOutputTokens": 400 }
+  "generationConfig": {
+    "temperature": 0,
+    "thinkingConfig": { "thinkingBudget": 0 },
+    "maxOutputTokens": 1500,
+    "responseMimeType": "application/json",
+    "responseSchema": {
+      "type": "OBJECT",
+      "properties": {
+        "intent": { "type": "STRING", "enum": ["consulta_propiedad", "agendar_visita", "consulta_general", "derivar_humano"] },
+        "confianza": { "type": "NUMBER" },
+        "entidades": { "type": "OBJECT", "properties": { "barrio": { "type": "STRING", "nullable": true } } }
+      },
+      "required": ["intent", "confianza", "entidades"]
+    }
+  }
 }
 ```
 
@@ -274,10 +293,12 @@ response shape, add a branch to `buildLlmRequest` and `extractLlmText` in
 
 ### Troubleshooting
 
-**`Classify Intent (LLM)` errors and the conversation falls back to
-`derivar_humano`.** Check the node's execution error first — with
-`onError: continueErrorOutput` the workflow doesn't stop, so this fails
-silently from the customer's side. Common causes:
+The conversation always ends up escalated to `derivar_humano` when the LLM
+step fails in any way — that's the point (see Error handling above), but it
+also means failures are silent from the customer's side. Check the executions
+of `Classify Intent (LLM)` and `Parse Classification` first.
+
+**`Classify Intent (LLM)` itself errors** (visible on the node, red output):
 
 - **`404 ... "This model models/X is no longer available to new users"`**
   (Gemini). Google periodically retires dated model snapshots for new API
@@ -294,6 +315,27 @@ silently from the customer's side. Common causes:
   `Build LLM Request` is still `JSON.stringify()`-ing both before returning.
 - **401/403**: the Header Auth credential's Name/Value don't match the
   provider table above, or the key itself is invalid/expired.
+
+**`Classify Intent (LLM)` succeeds (200 from the provider) but
+`Parse Classification` still falls back**, with *"El clasificador devolvió
+una respuesta que no se pudo interpretar"*:
+
+- **Truncated JSON** (e.g. the text cuts off mid-object, like
+  `{"entidades":{"barrio":"Nueva`). This happened to us with Gemini:
+  `gemini-flash-latest` is a *thinking* model, and reasoning tokens count
+  against `maxOutputTokens` — with a tight budget (400) the response got cut
+  before the JSON closed. The fix already in `buildLlmRequest` is
+  `generationConfig.thinkingConfig.thinkingBudget: 0` (thinking off) plus a
+  more generous `maxOutputTokens: 1500`, and `responseMimeType: "application/json"`
+  + `responseSchema` so Gemini guarantees the shape instead of best-effort
+  prompting. If you still see truncation with a different model/provider,
+  raise `maxOutputTokens` further or check for an equivalent
+  "disable reasoning" setting.
+- Either way, **check the raw response** before guessing: when the JSON can't
+  be parsed, `Parse Classification` logs it with `console.error` (visible in
+  the node's execution → **Logs**) and also keeps it on the item as
+  `textoCrudoSinParsear`, so you don't have to reproduce the failure to see
+  what the model actually sent back.
 
 ## Custom Code
 
