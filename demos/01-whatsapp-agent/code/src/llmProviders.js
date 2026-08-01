@@ -21,6 +21,24 @@ const MODELOS_POR_DEFECTO = {
   groq: 'llama-3.3-70b-versatile',
 };
 
+// Cuánto puede "razonar" Gemini antes de responder.
+//
+// Los modelos Gemini 3+ (a los que apunta hoy gemini-flash-latest) usan
+// thinkingLevel; los 2.5 usaban thinkingConfig.thinkingBudget. Mandar
+// `thinkingBudget: 0` a un Gemini 3 devuelve 400 INVALID_ARGUMENT — además,
+// Flash 3.x directamente no permite apagar el thinking del todo, "minimal" es
+// lo más bajo posible (verificado contra la API real: con "minimal" la
+// respuesta vuelve con thoughtsTokenCount = 0).
+//
+// Importa porque los tokens de razonamiento se descuentan de maxOutputTokens:
+// sin este límite el modelo gastaba ~700 tokens pensando y devolvía el JSON
+// cortado a la mitad.
+//
+// Valor especial 'off': omite thinkingConfig por completo, que es lo que hay
+// que usar si se apunta LLM_MODEL a un modelo viejo de la familia 2.5, que no
+// entiende thinkingLevel.
+const NIVEL_THINKING_POR_DEFECTO = 'minimal';
+
 function normalizarProveedor(proveedor) {
   return String(proveedor || PROVEEDOR_POR_DEFECTO).toLowerCase().trim();
 }
@@ -93,7 +111,7 @@ function urlPorDefecto(proveedor, modelo) {
  * Arma la request para el proveedor pedido. Devuelve url/headers/body como
  * datos planos: quien llama decide cómo pasárselos al HTTP Request node.
  *
- * @param {object} opciones { proveedor, modelo, apiUrl, promptSistema, mensajeUsuario }
+ * @param {object} opciones { proveedor, modelo, apiUrl, promptSistema, mensajeUsuario, nivelThinking }
  * @returns {{ url: string, headers: object, body: object }}
  */
 function buildLlmRequest(opciones) {
@@ -112,24 +130,30 @@ function buildLlmRequest(opciones) {
   }
 
   if (proveedor === 'gemini') {
+    const generationConfig = {
+      temperature: 0,
+      maxOutputTokens: 1500,
+      // JSON garantizado por schema, no "mejor esfuerzo" vía prompt. No es
+      // opcional: sin el schema el modelo inventa los nombres de los campos
+      // ("intencion", "clasificacion") y el whitelist de intents no matchea.
+      responseMimeType: 'application/json',
+      responseSchema: esquemaClasificacionGemini(),
+    };
+
+    const nivelThinking = String(datos.nivelThinking || NIVEL_THINKING_POR_DEFECTO)
+      .toLowerCase()
+      .trim();
+    if (nivelThinking !== 'off') {
+      generationConfig.thinkingConfig = { thinkingLevel: nivelThinking };
+    }
+
     return {
       url,
       headers: {},
       body: {
         system_instruction: { parts: [{ text: promptSistema }] },
         contents: [{ role: 'user', parts: [{ text: mensajeUsuario }] }],
-        generationConfig: {
-          temperature: 0,
-          // gemini-flash-latest es un modelo "thinking": sin este límite, los
-          // tokens de razonamiento se comen el presupuesto y la respuesta
-          // sale cortada a mitad del JSON (nos pasó con maxOutputTokens: 400
-          // armando esta demo). thinkingBudget: 0 lo apaga del todo.
-          thinkingConfig: { thinkingBudget: 0 },
-          maxOutputTokens: 1500,
-          // JSON garantizado por schema, no "mejor esfuerzo" vía prompt.
-          responseMimeType: 'application/json',
-          responseSchema: esquemaClasificacionGemini(),
-        },
+        generationConfig,
       },
     };
   }
@@ -201,6 +225,7 @@ module.exports = {
   PROVEEDOR_POR_DEFECTO,
   PROVEEDORES_SOPORTADOS,
   MODELOS_POR_DEFECTO,
+  NIVEL_THINKING_POR_DEFECTO,
   buildLlmRequest,
   extractLlmText,
   esquemaClasificacionGemini,

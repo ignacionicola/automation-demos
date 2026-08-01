@@ -175,6 +175,7 @@ Copy `.env.example` to `.env` and set the values on your n8n instance:
 | `LLM_PROVIDER` | Which LLM to call: `gemini` (default), `anthropic` or `groq` | `gemini` |
 | `LLM_MODEL` | Optional. Empty = provider's default model | `gemini-flash-latest` |
 | `LLM_API_URL` | Optional. Overrides the provider's default endpoint entirely | *(leave empty)* |
+| `LLM_THINKING_LEVEL` | Gemini only. `minimal` (default), `low`, `medium`, `high`, or `off` to omit the field for Gemini 2.5-era models | *(leave empty)* |
 | `AGENCY_NAME` | Agency name used in customer-facing copy | `Inmobiliaria Demo` |
 
 **Required n8n setting:** n8n blocks environment access from inside nodes by
@@ -226,11 +227,22 @@ credential's Name and Value (or save a second credential and re-select it on
 ### Example request bodies
 
 **Gemini** — system instruction is a separate field, entities go in
-`contents`. Thinking is explicitly disabled (`thinkingBudget: 0`) since
-`gemini-flash-latest` is a reasoning model and reasoning tokens otherwise eat
-into `maxOutputTokens`, truncating the JSON before it closes. `responseSchema`
-makes the shape guaranteed rather than best-effort (full schema in
-`code/src/llmProviders.js#esquemaClasificacionGemini`, abbreviated here):
+`contents`. Two details in `generationConfig` are load-bearing and were both
+verified against the live API:
+
+- **`thinkingConfig.thinkingLevel: "minimal"`** — `gemini-flash-latest` points
+  at a Gemini 3.x model, and reasoning tokens are billed against
+  `maxOutputTokens`. Left at the default the model spends ~700 tokens thinking
+  and the JSON gets truncated before it closes. Note it must be
+  `thinkingLevel`, **not** `thinkingBudget`: Gemini 3 rejects the latter with
+  `400 INVALID_ARGUMENT`, and Flash 3.x can't turn thinking fully off anyway —
+  `minimal` is the floor (and measures 0 reasoning tokens in practice).
+- **`responseSchema`** — not cosmetic. Without it the model returns
+  plausible-but-wrong Spanish field names (`intencion`, `clasificacion`
+  instead of `intent`), which fails the intent whitelist downstream.
+
+Full schema in `code/src/llmProviders.js#esquemaClasificacionGemini`,
+abbreviated here:
 
 ```json
 {
@@ -238,7 +250,7 @@ makes the shape guaranteed rather than best-effort (full schema in
   "contents": [{ "role": "user", "parts": [{ "text": "Fecha de hoy: 2026-08-03\n\nMensaje del cliente:\nHola" }] }],
   "generationConfig": {
     "temperature": 0,
-    "thinkingConfig": { "thinkingBudget": 0 },
+    "thinkingConfig": { "thinkingLevel": "minimal" },
     "maxOutputTokens": 1500,
     "responseMimeType": "application/json",
     "responseSchema": {
@@ -253,6 +265,12 @@ makes the shape guaranteed rather than best-effort (full schema in
   }
 }
 ```
+
+> Gemini's `responseSchema` uses its OpenAPI-subset `Type` enum — types are
+> **uppercase** (`"OBJECT"`, `"STRING"`) and optional fields use
+> `"nullable": true`. That's a different mechanism from the newer
+> `responseJsonSchema`, which takes standard lowercase JSON Schema. Mixing the
+> two is a easy way to get a `400`.
 
 **Anthropic** — Messages API, `system` is top-level, needs the
 `anthropic-version` header:
@@ -308,6 +326,16 @@ of `Classify Intent (LLM)` and `Parse Classification` first.
   instead of a dated version. If it happens again with a different model,
   set `LLM_MODEL` to whatever `GET /v1beta/models` (with your key) currently
   lists as `generateContent`-capable.
+- **`400 ... "Request contains an invalid argument"`** (Gemini), with no
+  field named in the response. Almost always something in `generationConfig`
+  that the model family doesn't accept. The one that bit us: `thinkingBudget`
+  is a Gemini 2.5-era parameter — Gemini 3.x wants `thinkingLevel`, and
+  rejects a `thinkingBudget: 0` "turn thinking off" request outright since
+  Flash 3.x has no full-off mode. If you pin `LLM_MODEL` to a 2.5 model, set
+  `LLM_THINKING_LEVEL=off` so the field is omitted entirely. Because the API
+  doesn't say *which* argument is invalid, the fastest way to isolate it is to
+  POST the body from `Build LLM Request` directly with `curl`, dropping one
+  `generationConfig` key at a time.
 - **`JSON parameter needs to be valid JSON`** on the HTTP node. This means
   `llmHeaders`/`llmBody` reached the node as JS objects instead of JSON
   strings — n8n's header handling doesn't accept objects and stringifies them
@@ -315,6 +343,12 @@ of `Classify Intent (LLM)` and `Parse Classification` first.
   `Build LLM Request` is still `JSON.stringify()`-ing both before returning.
 - **401/403**: the Header Auth credential's Name/Value don't match the
   provider table above, or the key itself is invalid/expired.
+
+> **Reading the real error.** `Classify Intent (LLM)` routes failures to its
+> *Error* output, so downstream nodes show "no items were sent on this branch"
+> and `Parse Classification` / `Match Properties` render empty — which looks
+> like *those* nodes broke. They didn't; check the HTTP node's Error branch
+> output, where the full provider response body is on `error.message`.
 
 **`Classify Intent (LLM)` succeeds (200 from the provider) but
 `Parse Classification` still falls back**, with *"El clasificador devolvió

@@ -29,14 +29,52 @@ test('buildLlmRequest arma la URL de Gemini con el modelo embebido', () => {
   assert.strictEqual(body.generationConfig.temperature, 0);
 });
 
-test('buildLlmRequest apaga el thinking de Gemini y sube el presupuesto de tokens', () => {
-  // gemini-flash-latest es un modelo "thinking": sin thinkingBudget: 0, el
-  // razonamiento se come maxOutputTokens y el JSON sale cortado a mitad
-  // (esto pasó de verdad con maxOutputTokens: 400 al armar esta demo).
+test('buildLlmRequest baja el thinking de Gemini al mínimo y sube el presupuesto de tokens', () => {
+  // Los tokens de razonamiento se descuentan de maxOutputTokens: sin bajar el
+  // thinking, el modelo gastaba ~700 pensando y devolvía el JSON cortado a
+  // mitad (pasó de verdad con maxOutputTokens: 400 al armar esta demo).
+  //
+  // Tiene que ser thinkingLevel y NO thinkingBudget: los Gemini 3+ (a los que
+  // apunta gemini-flash-latest) rechazan thinkingBudget con 400
+  // INVALID_ARGUMENT — verificado contra la API real.
   const { body } = buildLlmRequest({ proveedor: 'gemini', ...PROMPT_BASE });
 
-  assert.deepStrictEqual(body.generationConfig.thinkingConfig, { thinkingBudget: 0 });
+  assert.deepStrictEqual(body.generationConfig.thinkingConfig, { thinkingLevel: 'minimal' });
   assert.strictEqual(body.generationConfig.maxOutputTokens, 1500);
+  assert.ok(
+    !('thinkingBudget' in body.generationConfig.thinkingConfig),
+    'thinkingBudget rompe en Gemini 3+',
+  );
+});
+
+test('el nivel de thinking de Gemini se puede sobreescribir', () => {
+  const { body } = buildLlmRequest({ proveedor: 'gemini', nivelThinking: 'medium', ...PROMPT_BASE });
+
+  assert.deepStrictEqual(body.generationConfig.thinkingConfig, { thinkingLevel: 'medium' });
+});
+
+test('nivelThinking "off" omite thinkingConfig entero (para modelos Gemini 2.5)', () => {
+  // La familia 2.5 no entiende thinkingLevel, así que hay que poder no
+  // mandar el campo en absoluto.
+  const { body } = buildLlmRequest({ proveedor: 'gemini', nivelThinking: 'off', ...PROMPT_BASE });
+
+  assert.ok(!('thinkingConfig' in body.generationConfig));
+  assert.strictEqual(body.generationConfig.maxOutputTokens, 1500);
+});
+
+test('un nivelThinking vacío cae en el default', () => {
+  for (const vacio of ['', null, undefined]) {
+    const { body } = buildLlmRequest({ proveedor: 'gemini', nivelThinking: vacio, ...PROMPT_BASE });
+    assert.deepStrictEqual(body.generationConfig.thinkingConfig, { thinkingLevel: 'minimal' });
+  }
+});
+
+test('el thinking level solo aplica a Gemini, no a los otros proveedores', () => {
+  const groq = buildLlmRequest({ proveedor: 'groq', nivelThinking: 'high', ...PROMPT_BASE });
+  const anthropic = buildLlmRequest({ proveedor: 'anthropic', nivelThinking: 'high', ...PROMPT_BASE });
+
+  assert.ok(!('thinkingConfig' in groq.body));
+  assert.ok(!('thinkingConfig' in anthropic.body));
 });
 
 test('buildLlmRequest pide JSON estructurado garantizado por schema para Gemini', () => {
