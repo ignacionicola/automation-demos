@@ -173,13 +173,22 @@ Copy `.env.example` to `.env` and set the values on your n8n instance:
 | `TWILIO_WHATSAPP_FROM` | Sandbox number that sends messages (E.164, no `whatsapp:` prefix) | `+14155238886` |
 | `OWNER_WHATSAPP_NUMBER` | Where handoff alerts go — must have joined the sandbox | `+5493519876543` |
 | `LLM_PROVIDER` | Which LLM to call: `gemini` (default), `anthropic` or `groq` | `gemini` |
-| `LLM_MODEL` | Optional. Empty = provider's default model | `gemini-2.0-flash` |
+| `LLM_MODEL` | Optional. Empty = provider's default model | `gemini-2.5-flash` |
 | `LLM_API_URL` | Optional. Overrides the provider's default endpoint entirely | *(leave empty)* |
 | `AGENCY_NAME` | Agency name used in customer-facing copy | `Inmobiliaria Demo` |
 
 **Required n8n setting:** n8n blocks environment access from inside nodes by
 default. Set `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` on the instance, otherwise
 `$env` resolves to empty and the Twilio nodes have no `from` number.
+
+> `.env` in this folder is a **template for you to copy values from** — n8n
+> does not read `.env` files itself. The variables have to actually reach the
+> n8n process's environment: `docker run -e VAR=value`, a Compose `environment:`
+> block, a systemd `EnvironmentFile`, your PM2 config, etc., depending on how
+> you run n8n. If a variable isn't set that way, every node reads it as empty
+> and falls back to its documented default (e.g. `LLM_MODEL` empty → the
+> provider's default model) — nothing breaks, but double-check this if a
+> value you *did* set doesn't seem to take effect.
 
 ### 5. Import and run
 
@@ -205,7 +214,7 @@ changes when you switch providers.
 | Get a key | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) — free tier | [console.anthropic.com](https://console.anthropic.com/) | [console.groq.com/keys](https://console.groq.com/keys) — free tier |
 | n8n credential header **Name** | `x-goog-api-key` | `x-api-key` | `Authorization` |
 | n8n credential **Value** | your API key | your API key | `Bearer <your API key>` |
-| Default `LLM_MODEL` | `gemini-2.0-flash` | `claude-sonnet-5` | `llama-3.3-70b-versatile` |
+| Default `LLM_MODEL` | `gemini-2.5-flash` | `claude-sonnet-5` | `llama-3.3-70b-versatile` |
 | Default endpoint | `generativelanguage.googleapis.com/v1beta/models/{model}:generateContent` | `api.anthropic.com/v1/messages` | `api.groq.com/openai/v1/chat/completions` |
 
 All three credential types are the same n8n **Header Auth** credential

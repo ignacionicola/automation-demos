@@ -12,7 +12,7 @@ const PROVEEDOR_POR_DEFECTO = 'gemini';
 const PROVEEDORES_SOPORTADOS = ['gemini', 'anthropic', 'groq'];
 
 const MODELOS_POR_DEFECTO = {
-  gemini: 'gemini-2.0-flash',
+  gemini: 'gemini-2.5-flash',
   anthropic: 'claude-sonnet-5',
   groq: 'llama-3.3-70b-versatile',
 };

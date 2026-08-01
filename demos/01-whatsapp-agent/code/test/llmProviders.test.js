@@ -20,7 +20,7 @@ test('gemini es el proveedor por defecto', () => {
 test('buildLlmRequest arma la URL de Gemini con el modelo embebido', () => {
   const { url, headers, body } = buildLlmRequest({ proveedor: 'gemini', ...PROMPT_BASE });
 
-  assert.match(url, /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-2\.0-flash:generateContent$/);
+  assert.match(url, /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-2\.5-flash:generateContent$/);
   assert.deepStrictEqual(headers, {});
   assert.strictEqual(body.system_instruction.parts[0].text, PROMPT_BASE.promptSistema);
   assert.strictEqual(body.contents[0].role, 'user');
@@ -52,6 +52,33 @@ test('buildLlmRequest arma el body OpenAI-compatible de Groq', () => {
 test('usa gemini por defecto cuando no se especifica proveedor', () => {
   const { url } = buildLlmRequest({ ...PROMPT_BASE });
   assert.match(url, /generativelanguage\.googleapis\.com/);
+});
+
+// "Build LLM Request" (el Code node que llama a esta función) recibe modelo/
+// apiUrl vacíos cada vez que $env no está disponible en la instancia de n8n
+// (N8N_BLOCK_ENV_ACCESS_IN_NODE=true) o la variable simplemente no está
+// seteada. Estos casos confirman que un string vacío, null o undefined en
+// cualquiera de los dos campos cae siempre en el default del proveedor, en
+// vez de armar una URL o un modelo rotos.
+test('un modelo vacío (string, null o undefined) cae en el default del proveedor', () => {
+  for (const modeloVacio of ['', null, undefined]) {
+    const { body } = buildLlmRequest({ proveedor: 'groq', modelo: modeloVacio, ...PROMPT_BASE });
+    assert.strictEqual(body.model, MODELOS_POR_DEFECTO.groq);
+  }
+});
+
+test('un apiUrl vacío (string, null o undefined) cae en el endpoint por defecto del proveedor', () => {
+  for (const apiUrlVacio of ['', null, undefined]) {
+    const { url } = buildLlmRequest({ proveedor: 'gemini', apiUrl: apiUrlVacio, ...PROMPT_BASE });
+    assert.match(url, /^https:\/\/generativelanguage\.googleapis\.com\//);
+  }
+});
+
+test('un proveedor vacío (string, null o undefined) cae en gemini', () => {
+  for (const proveedorVacio of ['', null, undefined]) {
+    const { url } = buildLlmRequest({ proveedor: proveedorVacio, ...PROMPT_BASE });
+    assert.match(url, /generativelanguage\.googleapis\.com/);
+  }
 });
 
 test('el nombre del proveedor no distingue mayúsculas', () => {
