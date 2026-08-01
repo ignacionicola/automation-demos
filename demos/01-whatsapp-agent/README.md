@@ -151,18 +151,23 @@ and get an API key for it. **Gemini is the default** and is free.
 
 Create these two credentials in n8n (**Settings → Credentials → Add**):
 
-| Credential type | Name it | Fields |
+| Credential type | Name it **exactly** | Fields |
 |---|---|---|
 | **Twilio API** (`twilioApi`) | `Twilio — WhatsApp Sandbox` | Account SID, Auth Token |
 | **Header Auth** (`httpHeaderAuth`) | `LLM Provider — API Key` | Name and Value depend on the provider — see the table below |
 
-Then open the imported workflow and select them on the three nodes that need
-them: `Classify Intent (LLM)`, `Notify Owner (Twilio)` and
+**Create these before importing the workflow.** `workflow.json` references them
+by name, so n8n links them automatically on import and the workflow is ready to
+run — no going node by node to attach credentials. If a name doesn't match, the
+node imports with an empty credential slot and fails at runtime with
+`Credentials not found`; fix it by renaming the credential to match, or by
+selecting it manually on `Classify Intent (LLM)`, `Notify Owner (Twilio)` and
 `Send WhatsApp Reply (Twilio)`.
 
-> Credentials are never stored in this repository. The workflow references
-> them by n8n credential, and all non-secret configuration comes from
-> environment variables.
+> No secrets are stored in this repository — only the credential *names*.
+> Credential IDs are instance-specific and deliberately left `null`; n8n fills
+> them in on import by matching the name. All non-secret configuration comes
+> from environment variables.
 
 ### 4. Environment variables
 
@@ -343,6 +348,11 @@ of `Classify Intent (LLM)` and `Parse Classification` first.
   `Build LLM Request` is still `JSON.stringify()`-ing both before returning.
 - **401/403**: the Header Auth credential's Name/Value don't match the
   provider table above, or the key itself is invalid/expired.
+- **`Credentials not found`** — the node has no credential attached at all.
+  The workflow links credentials *by name* on import, so this means no
+  credential with the exact expected name existed at that moment (see
+  "n8n credentials" above). Create it with the documented name and re-import,
+  or attach it manually on the node.
 
 > **Reading the real error.** `Classify Intent (LLM)` routes failures to its
 > *Error* output, so downstream nodes show "no items were sent on this branch"

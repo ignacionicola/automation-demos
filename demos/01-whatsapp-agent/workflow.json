@@ -79,6 +79,12 @@
         500
       ],
       "name": "Classify Intent (LLM)",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": null,
+          "name": "LLM Provider — API Key"
+        }
+      },
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000,
@@ -365,6 +371,12 @@
         880
       ],
       "name": "Notify Owner (Twilio)",
+      "credentials": {
+        "twilioApi": {
+          "id": null,
+          "name": "Twilio — WhatsApp Sandbox"
+        }
+      },
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000,
@@ -402,6 +414,12 @@
         500
       ],
       "name": "Send WhatsApp Reply (Twilio)",
+      "credentials": {
+        "twilioApi": {
+          "id": null,
+          "name": "Twilio — WhatsApp Sandbox"
+        }
+      },
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000,
