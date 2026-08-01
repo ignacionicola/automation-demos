@@ -12,7 +12,11 @@ const PROVEEDOR_POR_DEFECTO = 'gemini';
 const PROVEEDORES_SOPORTADOS = ['gemini', 'anthropic', 'groq'];
 
 const MODELOS_POR_DEFECTO = {
-  gemini: 'gemini-2.5-flash',
+  // Alias estable de Google, no una versión fechada: apunta siempre al
+  // flash vigente, así que no se rompe cada vez que Google retira una
+  // versión (p. ej. "gemini-2.5-flash" empezó a devolver 404 "no longer
+  // available to new users" mientras se armaba esta demo).
+  gemini: 'gemini-flash-latest',
   anthropic: 'claude-sonnet-5',
   groq: 'llama-3.3-70b-versatile',
 };

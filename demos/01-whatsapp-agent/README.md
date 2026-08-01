@@ -173,7 +173,7 @@ Copy `.env.example` to `.env` and set the values on your n8n instance:
 | `TWILIO_WHATSAPP_FROM` | Sandbox number that sends messages (E.164, no `whatsapp:` prefix) | `+14155238886` |
 | `OWNER_WHATSAPP_NUMBER` | Where handoff alerts go — must have joined the sandbox | `+5493519876543` |
 | `LLM_PROVIDER` | Which LLM to call: `gemini` (default), `anthropic` or `groq` | `gemini` |
-| `LLM_MODEL` | Optional. Empty = provider's default model | `gemini-2.5-flash` |
+| `LLM_MODEL` | Optional. Empty = provider's default model | `gemini-flash-latest` |
 | `LLM_API_URL` | Optional. Overrides the provider's default endpoint entirely | *(leave empty)* |
 | `AGENCY_NAME` | Agency name used in customer-facing copy | `Inmobiliaria Demo` |
 
@@ -214,7 +214,7 @@ changes when you switch providers.
 | Get a key | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) — free tier | [console.anthropic.com](https://console.anthropic.com/) | [console.groq.com/keys](https://console.groq.com/keys) — free tier |
 | n8n credential header **Name** | `x-goog-api-key` | `x-api-key` | `Authorization` |
 | n8n credential **Value** | your API key | your API key | `Bearer <your API key>` |
-| Default `LLM_MODEL` | `gemini-2.5-flash` | `claude-sonnet-5` | `llama-3.3-70b-versatile` |
+| Default `LLM_MODEL` | `gemini-flash-latest` | `claude-sonnet-5` | `llama-3.3-70b-versatile` |
 | Default endpoint | `generativelanguage.googleapis.com/v1beta/models/{model}:generateContent` | `api.anthropic.com/v1/messages` | `api.groq.com/openai/v1/chat/completions` |
 
 All three credential types are the same n8n **Header Auth** credential
@@ -271,6 +271,29 @@ OpenAI-compatible `/chat/completions` route — set `LLM_PROVIDER=groq` and
 response shape, add a branch to `buildLlmRequest` and `extractLlmText` in
 `code/src/llmProviders.js` — both are covered by
 `code/test/llmProviders.test.js`.
+
+### Troubleshooting
+
+**`Classify Intent (LLM)` errors and the conversation falls back to
+`derivar_humano`.** Check the node's execution error first — with
+`onError: continueErrorOutput` the workflow doesn't stop, so this fails
+silently from the customer's side. Common causes:
+
+- **`404 ... "This model models/X is no longer available to new users"`**
+  (Gemini). Google periodically retires dated model snapshots for new API
+  keys/projects, sometimes before the model disappears from the `/models`
+  listing entirely — this bit us with `gemini-2.5-flash` while building this
+  demo, which is why the default is now the `gemini-flash-latest` alias
+  instead of a dated version. If it happens again with a different model,
+  set `LLM_MODEL` to whatever `GET /v1beta/models` (with your key) currently
+  lists as `generateContent`-capable.
+- **`JSON parameter needs to be valid JSON`** on the HTTP node. This means
+  `llmHeaders`/`llmBody` reached the node as JS objects instead of JSON
+  strings — n8n's header handling doesn't accept objects and stringifies them
+  with `String()` first, producing the literal `"[object Object]"`. Confirm
+  `Build LLM Request` is still `JSON.stringify()`-ing both before returning.
+- **401/403**: the Header Auth credential's Name/Value don't match the
+  provider table above, or the key itself is invalid/expired.
 
 ## Custom Code
 

@@ -20,7 +20,7 @@ test('gemini es el proveedor por defecto', () => {
 test('buildLlmRequest arma la URL de Gemini con el modelo embebido', () => {
   const { url, headers, body } = buildLlmRequest({ proveedor: 'gemini', ...PROMPT_BASE });
 
-  assert.match(url, /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-2\.5-flash:generateContent$/);
+  assert.match(url, /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-flash-latest:generateContent$/);
   assert.deepStrictEqual(headers, {});
   assert.strictEqual(body.system_instruction.parts[0].text, PROMPT_BASE.promptSistema);
   assert.strictEqual(body.contents[0].role, 'user');
