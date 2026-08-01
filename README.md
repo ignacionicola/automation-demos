@@ -23,7 +23,7 @@ calls, etc.).
 
 - **[n8n](https://n8n.io/)** — workflow orchestration (triggers, integrations, branching logic)
 - **Node.js** — custom logic where native n8n nodes aren't enough (API clients, data transforms, LLM calls)
-- **LLM APIs** (e.g. Claude) — used in demos that require natural-language understanding or generation
+- **LLM APIs** (Gemini, Claude, Groq, etc.) — used in demos that require natural-language understanding or generation; demo 01 shows a provider-agnostic setup
 - Third-party APIs relevant to each demo (WhatsApp Business, e-commerce platforms, social platforms, etc.) — see each demo's README for specifics
 
 ## Repository Structure

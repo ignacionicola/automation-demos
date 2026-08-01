@@ -1,5 +1,5 @@
 {
-  "name": "01 - WhatsApp Agent - Real Estate (Twilio + Claude)",
+  "name": "01 - WhatsApp Agent - Real Estate (Twilio + LLM)",
   "nodes": [
     {
       "parameters": {
@@ -20,7 +20,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Twilio manda el mensaje como application/x-www-form-urlencoded,\n// así que n8n lo deja en $json.body.\nconst entrada = $input.first().json;\nconst cuerpo = entrada.body || entrada;\n\n// Lectura tolerante de variables de entorno: si la instancia tiene el acceso\n// bloqueado (N8N_BLOCK_ENV_ACCESS_IN_NODE=true), el flujo sigue con el default\n// en vez de cortarse.\nfunction leerEnv(clave, porDefecto) {\n  try {\n    return $env[clave] || porDefecto;\n  } catch (error) {\n    return porDefecto;\n  }\n}\n\nconst telefonoCrudo = String(cuerpo.From || '').trim();\nif (!telefonoCrudo) {\n  throw new Error('El webhook no recibió el campo \"From\" de Twilio. ¿Está bien configurada la URL del sandbox?');\n}\n\n// Twilio lo manda como \"whatsapp:+549351...\". El nodo Twilio de salida vuelve\n// a agregar ese prefijo, así que internamente trabajamos con E.164 puro.\nconst telefonoCliente = telefonoCrudo.replace(/^whatsapp:/i, '');\nconst mensaje = String(cuerpo.Body || '').trim();\n\nreturn [\n  {\n    json: {\n      telefonoCliente,\n      nombreCliente: String(cuerpo.ProfileName || '').trim() || 'Sin nombre',\n      mensaje,\n      mensajeVacio: mensaje.length === 0,\n      messageSid: cuerpo.MessageSid || null,\n      agencia: leerEnv('AGENCY_NAME', 'la inmobiliaria'),\n      modelo: leerEnv('LLM_MODEL', 'claude-sonnet-5'),\n      recibidoEn: new Date().toISOString(),\n    },\n  },\n];"
+        "jsCode": "// Twilio manda el mensaje como application/x-www-form-urlencoded,\n// así que n8n lo deja en $json.body.\nconst entrada = $input.first().json;\nconst cuerpo = entrada.body || entrada;\n\n// Lectura tolerante de variables de entorno: si la instancia tiene el acceso\n// bloqueado (N8N_BLOCK_ENV_ACCESS_IN_NODE=true), el flujo sigue con el default\n// en vez de cortarse.\nfunction leerEnv(clave, porDefecto) {\n  try {\n    return $env[clave] || porDefecto;\n  } catch (error) {\n    return porDefecto;\n  }\n}\n\nconst telefonoCrudo = String(cuerpo.From || '').trim();\nif (!telefonoCrudo) {\n  throw new Error('El webhook no recibió el campo \"From\" de Twilio. ¿Está bien configurada la URL del sandbox?');\n}\n\n// Twilio lo manda como \"whatsapp:+549351...\". El nodo Twilio de salida vuelve\n// a agregar ese prefijo, así que internamente trabajamos con E.164 puro.\nconst telefonoCliente = telefonoCrudo.replace(/^whatsapp:/i, '');\nconst mensaje = String(cuerpo.Body || '').trim();\n\nreturn [\n  {\n    json: {\n      telefonoCliente,\n      nombreCliente: String(cuerpo.ProfileName || '').trim() || 'Sin nombre',\n      mensaje,\n      mensajeVacio: mensaje.length === 0,\n      messageSid: cuerpo.MessageSid || null,\n      agencia: leerEnv('AGENCY_NAME', 'la inmobiliaria'),\n      // Proveedor del LLM de clasificación: gemini (default, tiene free tier),\n      // anthropic o groq. El modelo y la URL son opcionales — si no se\n      // configuran, \"Build LLM Request\" usa el default de cada proveedor.\n      proveedorLlm: leerEnv('LLM_PROVIDER', 'gemini').toLowerCase(),\n      modelo: leerEnv('LLM_MODEL', ''),\n      apiUrlLlm: leerEnv('LLM_API_URL', '') || null,\n      recibidoEn: new Date().toISOString(),\n    },\n  },\n];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -45,22 +45,29 @@
     },
     {
       "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// <<< BEGIN GENERATED — generado por code/scripts/build-workflow.js, no editar a mano >>>\n\n// Lógica de src/llmProviders.js\n\n/**\n * Config y parsing específicos de cada proveedor de LLM.\n *\n * Existe para que \"Classify Intent (LLM)\" funcione contra Gemini (tiene free\n * tier), Anthropic o Groq sin tocar el resto del flujo — alcanza con cambiar\n * las variables de entorno LLM_PROVIDER / LLM_MODEL / LLM_API_URL. Ver el\n * README de la demo para el detalle de cómo apuntar a cada uno.\n */\n\nconst PROVEEDOR_POR_DEFECTO = 'gemini';\n\nconst PROVEEDORES_SOPORTADOS = ['gemini', 'anthropic', 'groq'];\n\nconst MODELOS_POR_DEFECTO = {\n  gemini: 'gemini-2.0-flash',\n  anthropic: 'claude-sonnet-5',\n  groq: 'llama-3.3-70b-versatile',\n};\n\nfunction normalizarProveedor(proveedor) {\n  return String(proveedor || PROVEEDOR_POR_DEFECTO).toLowerCase().trim();\n}\n\nfunction urlPorDefecto(proveedor, modelo) {\n  if (proveedor === 'gemini') {\n    return `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`;\n  }\n  if (proveedor === 'anthropic') return 'https://api.anthropic.com/v1/messages';\n  if (proveedor === 'groq') return 'https://api.groq.com/openai/v1/chat/completions';\n  return null;\n}\n\n/**\n * Arma la request para el proveedor pedido. Devuelve url/headers/body como\n * datos planos: quien llama decide cómo pasárselos al HTTP Request node.\n *\n * @param {object} opciones { proveedor, modelo, apiUrl, promptSistema, mensajeUsuario }\n * @returns {{ url: string, headers: object, body: object }}\n */\nfunction buildLlmRequest(opciones) {\n  const datos = opciones || {};\n  const proveedor = normalizarProveedor(datos.proveedor);\n  const modelo = datos.modelo || MODELOS_POR_DEFECTO[proveedor] || MODELOS_POR_DEFECTO[PROVEEDOR_POR_DEFECTO];\n  const promptSistema = datos.promptSistema || '';\n  const mensajeUsuario = datos.mensajeUsuario || '';\n\n  const url = datos.apiUrl || urlPorDefecto(proveedor, modelo);\n  if (!url) {\n    throw new Error(\n      `Proveedor de LLM desconocido: \"${datos.proveedor}\". Usá uno de: ${PROVEEDORES_SOPORTADOS.join(', ')}; ` +\n        'o configurá LLM_API_URL para apuntar a un endpoint compatible.',\n    );\n  }\n\n  if (proveedor === 'gemini') {\n    return {\n      url,\n      headers: {},\n      body: {\n        system_instruction: { parts: [{ text: promptSistema }] },\n        contents: [{ role: 'user', parts: [{ text: mensajeUsuario }] }],\n        generationConfig: { temperature: 0, maxOutputTokens: 400 },\n      },\n    };\n  }\n\n  if (proveedor === 'groq') {\n    return {\n      url,\n      headers: {},\n      body: {\n        model: modelo,\n        temperature: 0,\n        max_tokens: 400,\n        messages: [\n          { role: 'system', content: promptSistema },\n          { role: 'user', content: mensajeUsuario },\n        ],\n      },\n    };\n  }\n\n  // anthropic, y cualquier otro proveedor compatible con la Messages API\n  return {\n    url,\n    headers: { 'anthropic-version': '2023-06-01' },\n    body: {\n      model: modelo,\n      max_tokens: 400,\n      temperature: 0,\n      system: promptSistema,\n      messages: [{ role: 'user', content: mensajeUsuario }],\n    },\n  };\n}\n\n/**\n * Saca el texto de la respuesta cruda de la API. Devuelve null (nunca tira\n * error) ante cualquier forma inesperada — por ejemplo, un bloqueo de\n * seguridad de Gemini que responde 200 sin \"candidates\". Quien llama trata\n * un null exactamente igual que una respuesta no parseable.\n *\n * @param {string} proveedor\n * @param {object} respuesta cuerpo ya parseado como JSON\n * @returns {string|null}\n */\nfunction extractLlmText(proveedor, respuesta) {\n  if (!respuesta || typeof respuesta !== 'object') return null;\n  const p = normalizarProveedor(proveedor);\n\n  if (p === 'gemini') {\n    const candidato = Array.isArray(respuesta.candidates) ? respuesta.candidates[0] : null;\n    const parte = candidato && candidato.content && Array.isArray(candidato.content.parts)\n      ? candidato.content.parts[0]\n      : null;\n    return (parte && typeof parte.text === 'string' && parte.text) || null;\n  }\n\n  if (p === 'groq') {\n    const eleccion = Array.isArray(respuesta.choices) ? respuesta.choices[0] : null;\n    const contenido = eleccion && eleccion.message ? eleccion.message.content : null;\n    return (typeof contenido === 'string' && contenido) || null;\n  }\n\n  // anthropic\n  const bloque = Array.isArray(respuesta.content) ? respuesta.content[0] : null;\n  return (bloque && typeof bloque.text === 'string' && bloque.text) || null;\n}\n\n// <<< END GENERATED >>>\n\nconst item = $input.first().json;\n\nconst { url, headers, body } = buildLlmRequest({\n  proveedor: item.proveedorLlm,\n  modelo: item.modelo || undefined,\n  apiUrl: item.apiUrlLlm || undefined,\n  promptSistema: item.promptSistema,\n  mensajeUsuario: item.mensajeUsuario,\n});\n\nreturn [{ json: { ...item, llmUrl: url, llmHeaders: headers, llmBody: body } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        500
+      ],
+      "name": "Build LLM Request"
+    },
+    {
+      "parameters": {
         "method": "POST",
-        "url": "https://api.anthropic.com/v1/messages",
+        "url": "={{ $json.llmUrl }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "anthropic-version",
-              "value": "2023-06-01"
-            }
-          ]
-        },
+        "specifyHeaders": "json",
+        "jsonHeaders": "={{ $json.llmHeaders }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model: $json.modelo, max_tokens: 400, temperature: 0, system: $json.promptSistema, messages: [{ role: 'user', content: $json.mensajeUsuario }] }) }}",
+        "jsonBody": "={{ $json.llmBody }}",
         "options": {
           "timeout": 20000
         }
@@ -68,26 +75,26 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        440,
+        660,
         500
       ],
-      "name": "Classify Intent (Claude)",
+      "name": "Classify Intent (LLM)",
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000,
       "onError": "continueErrorOutput",
       "notesInFlow": true,
-      "notes": "Reintenta 3 veces; si falla, sale por la rama de error"
+      "notes": "Proveedor por LLM_PROVIDER (default: gemini). Reintenta 3 veces; si falla, sale por la rama de error"
     },
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Valida la salida del LLM antes de dejarla entrar al ruteo. Nunca confiamos\n// en que el modelo devolvió exactamente lo que le pedimos.\nconst INTENTS_VALIDOS = ['consulta_propiedad', 'agendar_visita', 'consulta_general', 'derivar_humano'];\nconst CONFIANZA_MINIMA = 0.6;\n\nconst respuesta = $input.first().json;\nconst contexto = $('Normalize Inbound Message').first().json;\n\nfunction extraerJson(texto) {\n  if (typeof texto !== 'string') return null;\n  // Por las dudas el modelo lo envuelva en un bloque de markdown.\n  const limpio = texto.replace(/```json/gi, '').replace(/```/g, '').trim();\n  const desde = limpio.indexOf('{');\n  const hasta = limpio.lastIndexOf('}');\n  if (desde === -1 || hasta === -1) return null;\n  try {\n    return JSON.parse(limpio.slice(desde, hasta + 1));\n  } catch (error) {\n    return null;\n  }\n}\n\nconst texto = respuesta && respuesta.content && respuesta.content[0] ? respuesta.content[0].text : '';\nconst parseado = extraerJson(texto);\n\nlet intent = parseado ? parseado.intent : null;\nlet confianza = parseado && typeof parseado.confianza === 'number' ? parseado.confianza : 0;\nlet motivoDerivacion = null;\n\nif (!parseado) {\n  intent = 'derivar_humano';\n  confianza = 0;\n  motivoDerivacion = 'El clasificador devolvió una respuesta que no se pudo interpretar';\n} else if (!INTENTS_VALIDOS.includes(intent)) {\n  motivoDerivacion = 'El clasificador devolvió un intent desconocido: ' + String(intent);\n  intent = 'derivar_humano';\n  confianza = 0;\n} else if (confianza < CONFIANZA_MINIMA) {\n  motivoDerivacion = 'Confianza baja del clasificador (' + confianza + ') sobre el intent \"' + intent + '\"';\n  intent = 'derivar_humano';\n} else if (contexto.mensajeVacio) {\n  motivoDerivacion = 'El cliente mandó un mensaje sin texto (probablemente audio o imagen)';\n  intent = 'derivar_humano';\n}\n\nreturn [\n  {\n    json: {\n      ...contexto,\n      intent,\n      confianza,\n      entidades: (parseado && parseado.entidades) || {},\n      motivoDerivacion,\n      clasificadorOk: true,\n    },\n  },\n];"
+        "jsCode": "// <<< BEGIN GENERATED — generado por code/scripts/build-workflow.js, no editar a mano >>>\n\n// Lógica de src/llmProviders.js\n\n/**\n * Config y parsing específicos de cada proveedor de LLM.\n *\n * Existe para que \"Classify Intent (LLM)\" funcione contra Gemini (tiene free\n * tier), Anthropic o Groq sin tocar el resto del flujo — alcanza con cambiar\n * las variables de entorno LLM_PROVIDER / LLM_MODEL / LLM_API_URL. Ver el\n * README de la demo para el detalle de cómo apuntar a cada uno.\n */\n\nconst PROVEEDOR_POR_DEFECTO = 'gemini';\n\nconst PROVEEDORES_SOPORTADOS = ['gemini', 'anthropic', 'groq'];\n\nconst MODELOS_POR_DEFECTO = {\n  gemini: 'gemini-2.0-flash',\n  anthropic: 'claude-sonnet-5',\n  groq: 'llama-3.3-70b-versatile',\n};\n\nfunction normalizarProveedor(proveedor) {\n  return String(proveedor || PROVEEDOR_POR_DEFECTO).toLowerCase().trim();\n}\n\nfunction urlPorDefecto(proveedor, modelo) {\n  if (proveedor === 'gemini') {\n    return `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`;\n  }\n  if (proveedor === 'anthropic') return 'https://api.anthropic.com/v1/messages';\n  if (proveedor === 'groq') return 'https://api.groq.com/openai/v1/chat/completions';\n  return null;\n}\n\n/**\n * Arma la request para el proveedor pedido. Devuelve url/headers/body como\n * datos planos: quien llama decide cómo pasárselos al HTTP Request node.\n *\n * @param {object} opciones { proveedor, modelo, apiUrl, promptSistema, mensajeUsuario }\n * @returns {{ url: string, headers: object, body: object }}\n */\nfunction buildLlmRequest(opciones) {\n  const datos = opciones || {};\n  const proveedor = normalizarProveedor(datos.proveedor);\n  const modelo = datos.modelo || MODELOS_POR_DEFECTO[proveedor] || MODELOS_POR_DEFECTO[PROVEEDOR_POR_DEFECTO];\n  const promptSistema = datos.promptSistema || '';\n  const mensajeUsuario = datos.mensajeUsuario || '';\n\n  const url = datos.apiUrl || urlPorDefecto(proveedor, modelo);\n  if (!url) {\n    throw new Error(\n      `Proveedor de LLM desconocido: \"${datos.proveedor}\". Usá uno de: ${PROVEEDORES_SOPORTADOS.join(', ')}; ` +\n        'o configurá LLM_API_URL para apuntar a un endpoint compatible.',\n    );\n  }\n\n  if (proveedor === 'gemini') {\n    return {\n      url,\n      headers: {},\n      body: {\n        system_instruction: { parts: [{ text: promptSistema }] },\n        contents: [{ role: 'user', parts: [{ text: mensajeUsuario }] }],\n        generationConfig: { temperature: 0, maxOutputTokens: 400 },\n      },\n    };\n  }\n\n  if (proveedor === 'groq') {\n    return {\n      url,\n      headers: {},\n      body: {\n        model: modelo,\n        temperature: 0,\n        max_tokens: 400,\n        messages: [\n          { role: 'system', content: promptSistema },\n          { role: 'user', content: mensajeUsuario },\n        ],\n      },\n    };\n  }\n\n  // anthropic, y cualquier otro proveedor compatible con la Messages API\n  return {\n    url,\n    headers: { 'anthropic-version': '2023-06-01' },\n    body: {\n      model: modelo,\n      max_tokens: 400,\n      temperature: 0,\n      system: promptSistema,\n      messages: [{ role: 'user', content: mensajeUsuario }],\n    },\n  };\n}\n\n/**\n * Saca el texto de la respuesta cruda de la API. Devuelve null (nunca tira\n * error) ante cualquier forma inesperada — por ejemplo, un bloqueo de\n * seguridad de Gemini que responde 200 sin \"candidates\". Quien llama trata\n * un null exactamente igual que una respuesta no parseable.\n *\n * @param {string} proveedor\n * @param {object} respuesta cuerpo ya parseado como JSON\n * @returns {string|null}\n */\nfunction extractLlmText(proveedor, respuesta) {\n  if (!respuesta || typeof respuesta !== 'object') return null;\n  const p = normalizarProveedor(proveedor);\n\n  if (p === 'gemini') {\n    const candidato = Array.isArray(respuesta.candidates) ? respuesta.candidates[0] : null;\n    const parte = candidato && candidato.content && Array.isArray(candidato.content.parts)\n      ? candidato.content.parts[0]\n      : null;\n    return (parte && typeof parte.text === 'string' && parte.text) || null;\n  }\n\n  if (p === 'groq') {\n    const eleccion = Array.isArray(respuesta.choices) ? respuesta.choices[0] : null;\n    const contenido = eleccion && eleccion.message ? eleccion.message.content : null;\n    return (typeof contenido === 'string' && contenido) || null;\n  }\n\n  // anthropic\n  const bloque = Array.isArray(respuesta.content) ? respuesta.content[0] : null;\n  return (bloque && typeof bloque.text === 'string' && bloque.text) || null;\n}\n\n// Lógica de src/parseClassification.js\n\n/**\n * Valida la salida del LLM antes de dejarla entrar al ruteo. Nunca confiamos\n * en que el modelo devolvió exactamente lo que le pedimos — sea cual sea el\n * proveedor configurado.\n */\n\nconst INTENTS_VALIDOS = ['consulta_propiedad', 'agendar_visita', 'consulta_general', 'derivar_humano'];\nconst CONFIANZA_MINIMA = 0.6;\n\nfunction extraerJson(texto) {\n  if (typeof texto !== 'string') return null;\n  // Por las dudas el modelo lo envuelva en un bloque de markdown.\n  const limpio = texto.replace(/```json/gi, '').replace(/```/g, '').trim();\n  const desde = limpio.indexOf('{');\n  const hasta = limpio.lastIndexOf('}');\n  if (desde === -1 || hasta === -1) return null;\n  try {\n    return JSON.parse(limpio.slice(desde, hasta + 1));\n  } catch (error) {\n    return null;\n  }\n}\n\n/**\n * @param {object} opciones { proveedor, respuestaCruda, mensajeVacio }\n * @returns {{intent: string, confianza: number, entidades: object, motivoDerivacion: string|null}}\n */\nfunction parseClassification(opciones) {\n  const datos = opciones || {};\n  const texto = extractLlmText(datos.proveedor, datos.respuestaCruda);\n  const parseado = extraerJson(texto);\n\n  let intent = parseado ? parseado.intent : null;\n  let confianza = parseado && typeof parseado.confianza === 'number' ? parseado.confianza : 0;\n  let motivoDerivacion = null;\n\n  if (!parseado) {\n    intent = 'derivar_humano';\n    confianza = 0;\n    motivoDerivacion = 'El clasificador devolvió una respuesta que no se pudo interpretar';\n  } else if (!INTENTS_VALIDOS.includes(intent)) {\n    motivoDerivacion = 'El clasificador devolvió un intent desconocido: ' + String(intent);\n    intent = 'derivar_humano';\n    confianza = 0;\n  } else if (confianza < CONFIANZA_MINIMA) {\n    motivoDerivacion = 'Confianza baja del clasificador (' + confianza + ') sobre el intent \"' + intent + '\"';\n    intent = 'derivar_humano';\n  } else if (datos.mensajeVacio) {\n    motivoDerivacion = 'El cliente mandó un mensaje sin texto (probablemente audio o imagen)';\n    intent = 'derivar_humano';\n  }\n\n  return {\n    intent,\n    confianza,\n    entidades: (parseado && parseado.entidades) || {},\n    motivoDerivacion,\n  };\n}\n\n// <<< END GENERATED >>>\n\nconst respuestaCruda = $input.first().json;\nconst contexto = $('Normalize Inbound Message').first().json;\n\nconst resultado = parseClassification({\n  proveedor: contexto.proveedorLlm,\n  respuestaCruda,\n  mensajeVacio: contexto.mensajeVacio,\n});\n\nreturn [\n  {\n    json: {\n      ...contexto,\n      intent: resultado.intent,\n      confianza: resultado.confianza,\n      entidades: resultado.entidades,\n      motivoDerivacion: resultado.motivoDerivacion,\n      clasificadorOk: true,\n    },\n  },\n];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        660,
+        880,
         420
       ],
       "name": "Parse Classification"
@@ -95,12 +102,12 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Rama de error del llamado a Claude: si la API falló después de los reintentos,\n// el cliente no se queda sin respuesta. Se lo trata como derivación a un humano\n// y el dueño recibe el aviso.\nconst contexto = $('Normalize Inbound Message').first().json;\nconst fallo = $input.first().json;\n\nconst detalle =\n  (fallo && fallo.error && fallo.error.message) ||\n  (fallo && fallo.message) ||\n  'error desconocido';\n\nreturn [\n  {\n    json: {\n      ...contexto,\n      intent: 'derivar_humano',\n      confianza: 0,\n      entidades: {},\n      clasificadorOk: false,\n      motivoDerivacion: 'El clasificador de IA no respondió (' + detalle + ')',\n    },\n  },\n];"
+        "jsCode": "// Rama de error del llamado al LLM: si la API falló después de los reintentos,\n// el cliente no se queda sin respuesta. Se lo trata como derivación a un humano\n// y el dueño recibe el aviso.\nconst contexto = $('Normalize Inbound Message').first().json;\nconst fallo = $input.first().json;\n\nconst detalle =\n  (fallo && fallo.error && fallo.error.message) ||\n  (fallo && fallo.message) ||\n  'error desconocido';\n\nreturn [\n  {\n    json: {\n      ...contexto,\n      intent: 'derivar_humano',\n      confianza: 0,\n      entidades: {},\n      clasificadorOk: false,\n      motivoDerivacion:\n        'El clasificador de IA (' + (contexto.proveedorLlm || 'desconocido') + ') no respondió (' + detalle + ')',\n    },\n  },\n];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        660,
+        880,
         620
       ],
       "name": "Build Fallback Classification"
@@ -214,7 +221,7 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.4,
       "position": [
-        880,
+        1100,
         500
       ],
       "name": "Route by Intent"
@@ -227,7 +234,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1120,
+        1340,
         100
       ],
       "name": "Match Properties"
@@ -240,7 +247,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1340,
+        1560,
         100
       ],
       "name": "Format Property Reply"
@@ -253,7 +260,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1120,
+        1340,
         320
       ],
       "name": "Validate Visit Request"
@@ -266,7 +273,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1340,
+        1560,
         320
       ],
       "name": "Append Visit to Mock Spreadsheet"
@@ -279,7 +286,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1560,
+        1780,
         320
       ],
       "name": "Format Scheduling Reply"
@@ -307,7 +314,7 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        1340,
+        1560,
         500
       ],
       "name": "Log Visit to Google Sheets",
@@ -323,7 +330,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1120,
+        1340,
         680
       ],
       "name": "Answer FAQ"
@@ -336,7 +343,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1120,
+        1340,
         880
       ],
       "name": "Build Handoff Messages"
@@ -354,7 +361,7 @@
       "type": "n8n-nodes-base.twilio",
       "typeVersion": 1,
       "position": [
-        1340,
+        1560,
         880
       ],
       "name": "Notify Owner (Twilio)",
@@ -373,7 +380,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1560,
+        1780,
         880
       ],
       "name": "Format Handoff Reply"
@@ -391,7 +398,7 @@
       "type": "n8n-nodes-base.twilio",
       "typeVersion": 1,
       "position": [
-        1820,
+        2040,
         500
       ],
       "name": "Send WhatsApp Reply (Twilio)",
@@ -410,15 +417,15 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2040,
+        2260,
         500
       ],
       "name": "Log Delivery Result"
     },
     {
       "parameters": {
-        "content": "## WhatsApp Agent — Real Estate Agency\n\nAn AI-assisted WhatsApp agent for a real estate agency in Córdoba, Argentina.\nIt classifies every inbound message into one of four intents and answers\naccordingly, escalating to a human whenever it is not confident.\n\n**Stack:** Twilio WhatsApp Sandbox → n8n → Claude → custom Node.js\n\n**Setup:** see `README.md` in this folder. You need two n8n credentials\n(`twilioApi` and an HTTP Header Auth for the Claude API key) plus the\nenvironment variables listed in `.env.example`.\n\n⚠️ The JS inside the Code nodes is generated from `code/src/`.\nEdit it there and run `npm run build:workflow` — do not edit it here.",
-        "height": 300,
+        "content": "## WhatsApp Agent — Real Estate Agency\n\nAn AI-assisted WhatsApp agent for a real estate agency in Córdoba, Argentina.\nIt classifies every inbound message into one of four intents and answers\naccordingly, escalating to a human whenever it is not confident.\n\n**Stack:** Twilio WhatsApp Sandbox → n8n → an LLM (Gemini by default —\nhas a free tier — or Anthropic/Groq) → custom Node.js\n\n**Setup:** see `README.md` in this folder. You need two n8n credentials\n(`twilioApi` and an HTTP Header Auth for the API key of your LLM provider)\nplus the environment variables listed in `.env.example`.\n\n⚠️ The JS inside the Code nodes is generated from `code/src/`.\nEdit it there and run `npm run build:workflow` — do not edit it here.",
+        "height": 320,
         "width": 620,
         "color": 4
       },
@@ -441,36 +448,36 @@
       "typeVersion": 1,
       "position": [
         -280,
-        400
+        420
       ],
       "name": "Sticky Note — 1. Ingest"
     },
     {
       "parameters": {
-        "content": "## 2. Classify with Claude\n\nOne call returns both the intent and the extracted entities\n(operation, property type, neighbourhood, bedrooms, budget,\nvisit date/time), because the property search needs them anyway.\n\n**Error handling:** the HTTP node retries 3 times. If it still\nfails, the error output feeds `Build Fallback Classification`,\nwhich forces `derivar_humano` so the customer always gets an\nanswer and the owner is notified.\n\n`Parse Classification` never trusts the model: it re-validates\nthe JSON, the intent value and the confidence score.",
-        "height": 480,
-        "width": 620,
+        "content": "## 2. Classify with an LLM\n\nProvider-agnostic by design: `Build LLM Request` reads\n`LLM_PROVIDER` (gemini by default, or anthropic/groq),\n`LLM_MODEL` and `LLM_API_URL` and builds the right URL,\nheaders and body for that provider — see the README for\nexample request bodies of each one.\n\nOne call returns both the intent and the extracted entities\n(operation, property type, neighbourhood, bedrooms, budget,\nvisit date/time), because the property search needs them anyway.\n\n**Error handling:** the HTTP node retries 3 times. If it still\nfails, the error output feeds `Build Fallback Classification`,\nwhich forces `derivar_humano` so the customer always gets an\nanswer and the owner is notified.\n\n`Parse Classification` never trusts the model: it re-validates\nthe JSON, the intent value and the confidence score, using the\nresponse shape of whichever provider is configured.",
+        "height": 560,
+        "width": 960,
         "color": 5
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
         200,
-        300
+        280
       ],
-      "name": "Sticky Note — 2. Classify with Claude"
+      "name": "Sticky Note — 2. Classify with an LLM"
     },
     {
       "parameters": {
         "content": "## 3. Route\n\nFour outputs, one per intent.\n\nUnknown values fall back\nto `derivar_humano`.",
         "height": 280,
-        "width": 240,
+        "width": 260,
         "color": 6
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        840,
+        1060,
         380
       ],
       "name": "Sticky Note — 3. Route"
@@ -485,7 +492,7 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        1080,
+        1300,
         -60
       ],
       "name": "Sticky Note — 4. Property search"
@@ -500,7 +507,7 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        1080,
+        1300,
         200
       ],
       "name": "Sticky Note — 5. Visit scheduling"
@@ -515,7 +522,7 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        1080,
+        1300,
         600
       ],
       "name": "Sticky Note — 6. General questions"
@@ -530,7 +537,7 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        1080,
+        1300,
         800
       ],
       "name": "Sticky Note — 7. Human handoff"
@@ -545,7 +552,7 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        1780,
+        2000,
         340
       ],
       "name": "Sticky Note — 8. Outbound & logging"
@@ -578,14 +585,25 @@
       "main": [
         [
           {
-            "node": "Classify Intent (Claude)",
+            "node": "Build LLM Request",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Classify Intent (Claude)": {
+    "Build LLM Request": {
+      "main": [
+        [
+          {
+            "node": "Classify Intent (LLM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Intent (LLM)": {
       "main": [
         [
           {

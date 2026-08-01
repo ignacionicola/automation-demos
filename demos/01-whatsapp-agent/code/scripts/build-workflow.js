@@ -29,6 +29,17 @@ const FIN = '// <<< END GENERATED >>>';
  * función o constante, porque terminan concatenados en el mismo scope.
  */
 const BUNDLES = {
+  'Build LLM Request': {
+    datos: {},
+    modulos: ['llmProviders.js'],
+  },
+  'Parse Classification': {
+    // llmProviders.js primero: parseClassification.js llama a extractLlmText,
+    // que tiene que estar ya definida en el scope cuando se inyectan las dos
+    // en el mismo Code node.
+    datos: {},
+    modulos: ['llmProviders.js', 'parseClassification.js'],
+  },
   'Match Properties': {
     datos: { PROPIEDADES: 'properties.json' },
     modulos: ['matchProperties.js'],
