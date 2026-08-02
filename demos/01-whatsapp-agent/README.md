@@ -29,15 +29,18 @@ human with the full context, instead of guessing.
 ```mermaid
 flowchart TD
     A["Receive WhatsApp Message<br/>(WhatsApp Trigger)"] --> B[Normalize Inbound Message]
-    B --> C[Build Classification Prompt]
-    C --> C2["Build LLM Request<br/>(provider-specific url/headers/body)"]
+    B --> MR[("Read Conversation<br/>(data table)")]
+    MR --> C[Build Classification Prompt]
+    C --> MW[("Remember Inbound Message<br/>(data table)")]
+    MW --> C2["Build LLM Request<br/>(provider-specific url/headers/body)"]
     C2 --> D["Classify Intent (LLM)"]
 
     D -->|ok| E[Parse Classification]
     D -->|error| F[Build Fallback Classification]
 
-    E --> G{Route by Intent}
-    F --> G
+    E --> MU[Update Conversation Memory]
+    F --> MU
+    MU --> G{Route by Intent}
 
     G -->|consulta_propiedad| H[Match Properties]
     H --> I[Format Property Reply]
@@ -58,6 +61,7 @@ flowchart TD
     N --> R
     Q --> R
     R --> S[Log Delivery Result]
+    S --> MS[("Save Conversation Memory<br/>(data table)")]
 ```
 
 ### The four intents
@@ -79,6 +83,18 @@ flowchart TD
   entities (operation, property type, neighbourhood, bedrooms, budget, date,
   time) in a single request, because the property search needs those entities
   anyway.
+- **Conversation memory, keyed by phone number.** A real WhatsApp exchange
+  splits one request across several messages: *"busco depto en Nueva Córdoba"*
+  then *"algo de un dormitorio"*. The second names neither the neighbourhood
+  nor the operation, so on its own it searches the whole catalogue. The last 6
+  messages and the entities gathered so far are kept per phone number (dropped
+  after 30 minutes of inactivity) and used two ways: the history goes into the
+  prompt so the model can resolve *"ese"* or *"algo más barato"*, and the
+  stored entities are merged with the new ones before routing. The merge runs
+  in code (`conversationMemory.js`), so carrying context forward is
+  deterministic and testable — a newly supplied value overrides the stored one,
+  an absent one leaves it standing. See
+  [why it uses a data table](#why-a-data-table-and-not-workflow-static-data).
 - **The model's output is never trusted.** `Parse Classification` re-parses the
   JSON (tolerating markdown fences), checks the intent against a whitelist and
   enforces a minimum confidence of `0.6`. Anything that fails becomes
@@ -91,6 +107,43 @@ flowchart TD
   replying "nothing found".
 - **Explicit error handling on both external APIs.** See below.
 
+### Why a data table, and not workflow static data
+
+`$getWorkflowStaticData` is the obvious choice for "persist something without
+extra infrastructure" — this demo already uses it for the mock visits
+spreadsheet — but it does not work for conversation memory, and the reason is
+worth spelling out because it isn't obvious until it bites.
+
+n8n loads static data **when an execution starts** and writes it back **when
+that execution ends**. There is no locking in between. Two messages sent a few
+seconds apart are exactly the case this feature exists for, and classification
+takes several seconds, so the two executions overlap. Measured here on the
+first attempt:
+
+| Execution | Started | Finished |
+|---|---|---|
+| message 1 | `05:12:33.628` | `05:12:41.624` |
+| message 2 | `05:12:37.966` | `05:12:48.251` |
+
+Message 2 read the store at ~`:38`, four seconds before message 1 had written
+anything. Both started from the same empty snapshot, and the one that finished
+last overwrote the other — message 1 vanished from the history entirely, and
+message 2 was classified with no context at all.
+
+A data table row is written **when the node runs**, not when the execution
+ends, so writing the inbound message *before* the LLM call is enough for the
+next execution to find it. Two different customers can never clobber each
+other either, since they are separate rows rather than one shared blob.
+
+The remaining edge, documented rather than hidden: when two messages overlap,
+the *entity* merge of the second still runs against the state read before the
+first one finished classifying, so accumulated entities can lag by one message.
+The message history is unaffected, and the prompt tells the model it may
+restate values from the context, so the classification itself still sees the
+full request. Closing that gap completely would mean re-reading the row after
+classification — three more nodes for a case where the answer is already
+correct, which didn't seem a good trade for a demo.
+
 ### Error handling
 
 | Failure | Behaviour |
@@ -100,6 +153,8 @@ flowchart TD
 | Owner notification fails | `Notify Owner` continues on error, so the customer still receives their reply. |
 | Reply delivery fails | `Send WhatsApp Reply` retries 3×; the outcome is recorded by `Log Delivery Result`. No alert is attempted over WhatsApp — if WhatsApp is down, that alert would fail too. |
 | Unknown intent reaches the router | The Switch's fallback output routes it to `derivar_humano`. |
+| The LLM call failed, so this message has no entities | `Update Conversation Memory` sits after *both* classifier branches, so a fallback still records the message and keeps the entities gathered earlier — one failed call doesn't wipe the customer's context. |
+| The `whatsapp_conversations` table is missing, or a data table node errors | All three data table nodes are set to continue on error with `alwaysOutputData`, so the flow runs without memory rather than leaving the customer unanswered. Memory is an enhancement, not a dependency — this is also what makes the workflow importable and runnable before the table exists. |
 | `LLM_PROVIDER` set to something unsupported | `Build LLM Request` throws immediately with a clear message — this is a deploy-time misconfiguration, not a per-message failure, so it is surfaced as a failed execution rather than silently guessed at. |
 
 ## Requirements
@@ -145,7 +200,7 @@ No npm dependencies — the custom code uses only the Node standard library.
 > **Don't configure the webhook by hand in Meta's dashboard.** n8n's
 > WhatsApp Trigger node registers its own webhook subscription via the
 > Graph API the moment you activate the workflow — there's no callback URL
-> to paste in manually. See [Import and run](#5-import-and-run) below. Just
+> to paste in manually. See [Import and run](#6-import-and-run) below. Just
 > make sure your n8n instance already has a public URL before you activate
 > it.
 
@@ -154,12 +209,34 @@ No npm dependencies — the custom code uses only the Node standard library.
 > token**, scoped to `whatsapp_business_messaging` and
 > `whatsapp_business_management` on your app.
 
-### 2. Choose an LLM provider
+### 2. Create the conversation memory table
+
+In n8n, open **Data tables** (next to Workflows and Credentials) and create one
+named exactly `whatsapp_conversations`, with three `String` columns:
+
+| Column | Holds |
+|---|---|
+| `telefono` | The customer's number, digits only — the key, one row per person |
+| `estado` | The conversation state as JSON: recent messages and accumulated entities |
+| `actualizadoEn` | ISO timestamp of the last message, for eyeballing the table |
+
+The workflow references the table **by name**, the same way it references
+credentials, so it links up on import without editing any node.
+
+If you skip this step the workflow still runs — the data table nodes are set to
+continue on error, and the agent simply behaves as it did before, classifying
+each message on its own.
+
+> Rows are never deleted: an expired conversation is ignored on read (30
+> minutes of inactivity) and overwritten the next time that number writes. For a
+> long-running deployment, prune the table periodically on `actualizadoEn`.
+
+### 3. Choose an LLM provider
 
 Pick one — see [LLM Provider](#llm-provider) below for the full comparison —
 and get an API key for it. **Gemini is the default** and is free.
 
-### 3. n8n credentials
+### 4. n8n credentials
 
 Create these three credentials in n8n (**Settings → Credentials → Add**):
 
@@ -183,7 +260,7 @@ selecting it manually on `Receive WhatsApp Message (WhatsApp Trigger)`,
 > them in on import by matching the name. All non-secret configuration comes
 > from environment variables.
 
-### 4. Environment variables
+### 5. Environment variables
 
 Copy `.env.example` to `.env` and set the values on your n8n instance:
 
@@ -211,7 +288,7 @@ default. Set `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` on the instance, otherwise
 > provider's default model) — nothing breaks, but double-check this if a
 > value you *did* set doesn't seem to take effect.
 
-### 5. Import and run
+### 6. Import and run
 
 ```bash
 # From this folder
@@ -450,14 +527,15 @@ code/
 │   ├── llmProviders.js         per-provider request building + response parsing
 │   ├── parseClassification.js  validates the model's output, provider-agnostic
 │   ├── phoneNumbers.js         recipient formatting for the Cloud API
-│   └── llmFailureReason.js     turns a failed LLM call into a readable reason
-├── test/                       96 tests, node:test, no dependencies
+│   ├── llmFailureReason.js     turns a failed LLM call into a readable reason
+│   └── conversationMemory.js   per-phone history and entity accumulation
+├── test/                       115 tests, node:test, no dependencies
 └── scripts/build-workflow.js   injects src/ into the workflow's Code nodes
 ```
 
 ```bash
 cd code
-npm test                  # 96 tests
+npm test                  # 115 tests
 npm run build:workflow    # regenerate workflow.json from src/
 npm run check:workflow    # fail if the committed workflow.json is stale
 ```
@@ -538,6 +616,12 @@ This is a portfolio demo, so a few things are deliberately simplified:
   the production path.
 - **The USD→ARS rate is a constant** in `matchProperties.js`. Production would
   read it from an exchange rate API.
-- **No conversation memory.** Each message is classified on its own. Adding
-  history means persisting per-phone state and including it in the prompt.
+- **Conversation memory rows are never pruned.** An expired conversation is
+  ignored on read and overwritten on the next message from that number, but the
+  row stays. A long-running deployment should delete rows by `actualizadoEn`
+  on a schedule.
+- **Accumulated entities are not cleared once acted on.** Within the 30-minute
+  window, a date given for one viewing is still on file if the customer then
+  asks about a different property. Clearing them per intent would be the next
+  refinement.
 - **Text messages only.** Audio and images are routed to a human.

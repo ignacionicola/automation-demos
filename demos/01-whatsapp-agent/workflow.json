@@ -28,7 +28,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// <<< BEGIN GENERATED — generado por code/scripts/build-workflow.js, no editar a mano >>>\n\n// Lógica de src/phoneNumbers.js\n\n/**\n * Normalización de números para la WhatsApp Cloud API.\n *\n * Por qué existe: Meta usa dos formatos distintos para el mismo teléfono, y\n * mezclarlos rompe el envío. En los mensajes entrantes el webhook entrega el\n * `wa_id` de un celular argentino CON el 9 de móvil (549XXXXXXXXXX), pero\n * `POST /{phone-number-id}/messages` rechaza exactamente ese número con\n * `(#131030) Recipient phone number not in allowed list` — aunque el número\n * esté agregado y verificado en la lista de destinatarios. Hay que mandarlo\n * SIN el 9 (54XXXXXXXXXX).\n *\n * Verificado contra la API real: enviando a `543511234567` el mensaje sale, y\n * el webhook de estado vuelve con `recipient_id: \"5493511234567\"` — o sea que\n * Meta normaliza de vuelta a la forma con 9 por su cuenta. El error es\n * engañoso: parece un problema de permisos, pero es de formato.\n */\n\n// El dígito que va entre el código de país y el área para indicar \"móvil\", y\n// que la Cloud API no acepta en el destinatario. Solo se listan los países\n// verificados contra la API; el resto de los números pasan sin tocar.\nconst PREFIJO_MOVIL_POR_PAIS = {\n  // Argentina. No hay ambigüedad posible: ningún código de área argentino\n  // empieza con 9, así que un número que arranca con 549 es siempre un celular.\n  54: '9',\n};\n\nfunction soloDigitos(numero) {\n  return String(numero || '').replace(/\\D/g, '');\n}\n\n/**\n * Pasa un número al formato que espera el campo `to` de la Cloud API: solo\n * dígitos, sin \"+\" y sin el prefijo de móvil que Meta rechaza.\n *\n * @param {string} numero en cualquier formato (E.164, con espacios, guiones…)\n * @returns {string} solo dígitos, listo para mandar; '' si la entrada es basura\n */\nfunction toWhatsAppRecipient(numero) {\n  const digitos = soloDigitos(numero);\n  if (!digitos) return '';\n\n  for (const [pais, prefijoMovil] of Object.entries(PREFIJO_MOVIL_POR_PAIS)) {\n    const conPrefijo = `${pais}${prefijoMovil}`;\n    if (digitos.startsWith(conPrefijo)) {\n      return pais + digitos.slice(conPrefijo.length);\n    }\n  }\n\n  return digitos;\n}\n\n// <<< END GENERATED >>>\n\n// El WhatsApp Trigger ya nos entrega el \"value\" del evento de Meta parseado\n// (no el body crudo del webhook): trae messaging_product, metadata, contacts\n// y messages. El filtro \"messageStatusUpdates: []\" del trigger ya descarta\n// los eventos que son solo actualizaciones de estado (sent/delivered/read),\n// así que acá solo deberían llegar mensajes reales.\nconst entrada = $input.first().json;\n\n// Lectura tolerante de variables de entorno: si la instancia tiene el acceso\n// bloqueado (N8N_BLOCK_ENV_ACCESS_IN_NODE=true), el flujo sigue con el default\n// en vez de cortarse.\nfunction leerEnv(clave, porDefecto) {\n  try {\n    return $env[clave] || porDefecto;\n  } catch (error) {\n    return porDefecto;\n  }\n}\n\nconst mensajeEntrante = (entrada.messages && entrada.messages[0]) || null;\nif (!mensajeEntrante) {\n  throw new Error('El evento del webhook de Meta no trae un mensaje (\"messages\"). ¿Llegó un status update en vez de un mensaje entrante?');\n}\n\nconst telefonoCrudo = String(mensajeEntrante.from || '').trim();\nif (!telefonoCrudo) {\n  throw new Error('El mensaje de WhatsApp no trae el campo \"from\". ¿Está bien configurado el webhook en Meta for Developers?');\n}\n\n// Meta manda el número sin \"+\" (ej. \"5493511234567\"). Lo normalizamos a E.164\n// porque el resto del flujo (logs, mensajes al dueño) espera ese formato.\nconst telefonoCliente = telefonoCrudo.startsWith('+') ? telefonoCrudo : `+${telefonoCrudo}`;\n\nconst contacto = (entrada.contacts && entrada.contacts[0]) || {};\n// Solo leemos texto: audio/imagen/etc. quedan con mensaje vacío y terminan en\n// derivar_humano, igual que antes (ver \"Notes and Limitations\" del README).\nconst mensaje =\n  mensajeEntrante.type === 'text'\n    ? String((mensajeEntrante.text && mensajeEntrante.text.body) || '').trim()\n    : '';\n\nreturn [\n  {\n    json: {\n      telefonoCliente,\n      // Los dos nodos de salida mandan a estos, NO a la versión E.164 de\n      // arriba: la Cloud API rechaza el 9 de móvil argentino. Ver el porqué\n      // en code/src/phoneNumbers.js.\n      telefonoClienteParaEnvio: toWhatsAppRecipient(telefonoCliente),\n      telefonoDuenoParaEnvio: toWhatsAppRecipient(leerEnv('OWNER_WHATSAPP_NUMBER', '')),\n      nombreCliente: String((contacto.profile && contacto.profile.name) || '').trim() || 'Sin nombre',\n      mensaje,\n      mensajeVacio: mensaje.length === 0,\n      messageSid: mensajeEntrante.id || null,\n      agencia: leerEnv('AGENCY_NAME', 'la inmobiliaria'),\n      // Proveedor del LLM de clasificación: gemini (default, tiene free tier),\n      // anthropic o groq. El modelo y la URL son opcionales — si no se\n      // configuran, \"Build LLM Request\" usa el default de cada proveedor.\n      proveedorLlm: leerEnv('LLM_PROVIDER', 'gemini').toLowerCase(),\n      modelo: leerEnv('LLM_MODEL', ''),\n      apiUrlLlm: leerEnv('LLM_API_URL', '') || null,\n      // Solo aplica a Gemini: minimal | low | medium | high, u \"off\" para no\n      // mandar thinkingConfig (necesario si se apunta a un modelo 2.5).\n      nivelThinking: leerEnv('LLM_THINKING_LEVEL', ''),\n      recibidoEn: new Date().toISOString(),\n    },\n  },\n];"
+        "jsCode": "// <<< BEGIN GENERATED — generado por code/scripts/build-workflow.js, no editar a mano >>>\n\n// Lógica de src/phoneNumbers.js\n\n/**\r\n * Normalización de números para la WhatsApp Cloud API.\r\n *\r\n * Por qué existe: Meta usa dos formatos distintos para el mismo teléfono, y\r\n * mezclarlos rompe el envío. En los mensajes entrantes el webhook entrega el\r\n * `wa_id` de un celular argentino CON el 9 de móvil (549XXXXXXXXXX), pero\r\n * `POST /{phone-number-id}/messages` rechaza exactamente ese número con\r\n * `(#131030) Recipient phone number not in allowed list` — aunque el número\r\n * esté agregado y verificado en la lista de destinatarios. Hay que mandarlo\r\n * SIN el 9 (54XXXXXXXXXX).\r\n *\r\n * Verificado contra la API real: enviando a `543511234567` el mensaje sale, y\r\n * el webhook de estado vuelve con `recipient_id: \"5493511234567\"` — o sea que\r\n * Meta normaliza de vuelta a la forma con 9 por su cuenta. El error es\r\n * engañoso: parece un problema de permisos, pero es de formato.\r\n */\r\n\r\n// El dígito que va entre el código de país y el área para indicar \"móvil\", y\r\n// que la Cloud API no acepta en el destinatario. Solo se listan los países\r\n// verificados contra la API; el resto de los números pasan sin tocar.\r\nconst PREFIJO_MOVIL_POR_PAIS = {\r\n  // Argentina. No hay ambigüedad posible: ningún código de área argentino\r\n  // empieza con 9, así que un número que arranca con 549 es siempre un celular.\r\n  54: '9',\r\n};\r\n\r\nfunction soloDigitos(numero) {\r\n  return String(numero || '').replace(/\\D/g, '');\r\n}\r\n\r\n/**\r\n * Pasa un número al formato que espera el campo `to` de la Cloud API: solo\r\n * dígitos, sin \"+\" y sin el prefijo de móvil que Meta rechaza.\r\n *\r\n * @param {string} numero en cualquier formato (E.164, con espacios, guiones…)\r\n * @returns {string} solo dígitos, listo para mandar; '' si la entrada es basura\r\n */\r\nfunction toWhatsAppRecipient(numero) {\r\n  const digitos = soloDigitos(numero);\r\n  if (!digitos) return '';\r\n\r\n  for (const [pais, prefijoMovil] of Object.entries(PREFIJO_MOVIL_POR_PAIS)) {\r\n    const conPrefijo = `${pais}${prefijoMovil}`;\r\n    if (digitos.startsWith(conPrefijo)) {\r\n      return pais + digitos.slice(conPrefijo.length);\r\n    }\r\n  }\r\n\r\n  return digitos;\r\n}\n\n// <<< END GENERATED >>>\n\n// El WhatsApp Trigger ya nos entrega el \"value\" del evento de Meta parseado\n// (no el body crudo del webhook): trae messaging_product, metadata, contacts\n// y messages. El filtro \"messageStatusUpdates: []\" del trigger ya descarta\n// los eventos que son solo actualizaciones de estado (sent/delivered/read),\n// así que acá solo deberían llegar mensajes reales.\nconst entrada = $input.first().json;\n\n// Lectura tolerante de variables de entorno: si la instancia tiene el acceso\n// bloqueado (N8N_BLOCK_ENV_ACCESS_IN_NODE=true), el flujo sigue con el default\n// en vez de cortarse.\nfunction leerEnv(clave, porDefecto) {\n  try {\n    return $env[clave] || porDefecto;\n  } catch (error) {\n    return porDefecto;\n  }\n}\n\nconst mensajeEntrante = (entrada.messages && entrada.messages[0]) || null;\nif (!mensajeEntrante) {\n  throw new Error('El evento del webhook de Meta no trae un mensaje (\"messages\"). ¿Llegó un status update en vez de un mensaje entrante?');\n}\n\nconst telefonoCrudo = String(mensajeEntrante.from || '').trim();\nif (!telefonoCrudo) {\n  throw new Error('El mensaje de WhatsApp no trae el campo \"from\". ¿Está bien configurado el webhook en Meta for Developers?');\n}\n\n// Meta manda el número sin \"+\" (ej. \"5493511234567\"). Lo normalizamos a E.164\n// porque el resto del flujo (logs, mensajes al dueño) espera ese formato.\nconst telefonoCliente = telefonoCrudo.startsWith('+') ? telefonoCrudo : `+${telefonoCrudo}`;\n\nconst contacto = (entrada.contacts && entrada.contacts[0]) || {};\n// Solo leemos texto: audio/imagen/etc. quedan con mensaje vacío y terminan en\n// derivar_humano, igual que antes (ver \"Notes and Limitations\" del README).\nconst mensaje =\n  mensajeEntrante.type === 'text'\n    ? String((mensajeEntrante.text && mensajeEntrante.text.body) || '').trim()\n    : '';\n\nreturn [\n  {\n    json: {\n      telefonoCliente,\n      // Los dos nodos de salida mandan a estos, NO a la versión E.164 de\n      // arriba: la Cloud API rechaza el 9 de móvil argentino. Ver el porqué\n      // en code/src/phoneNumbers.js.\n      telefonoClienteParaEnvio: toWhatsAppRecipient(telefonoCliente),\n      telefonoDuenoParaEnvio: toWhatsAppRecipient(leerEnv('OWNER_WHATSAPP_NUMBER', '')),\n      nombreCliente: String((contacto.profile && contacto.profile.name) || '').trim() || 'Sin nombre',\n      mensaje,\n      mensajeVacio: mensaje.length === 0,\n      messageSid: mensajeEntrante.id || null,\n      agencia: leerEnv('AGENCY_NAME', 'la inmobiliaria'),\n      // Proveedor del LLM de clasificación: gemini (default, tiene free tier),\n      // anthropic o groq. El modelo y la URL son opcionales — si no se\n      // configuran, \"Build LLM Request\" usa el default de cada proveedor.\n      proveedorLlm: leerEnv('LLM_PROVIDER', 'gemini').toLowerCase(),\n      modelo: leerEnv('LLM_MODEL', ''),\n      apiUrlLlm: leerEnv('LLM_API_URL', '') || null,\n      // Solo aplica a Gemini: minimal | low | medium | high, u \"off\" para no\n      // mandar thinkingConfig (necesario si se apunta a un modelo 2.5).\n      nivelThinking: leerEnv('LLM_THINKING_LEVEL', ''),\n      recibidoEn: new Date().toISOString(),\n    },\n  },\n];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -40,26 +40,108 @@
     },
     {
       "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "whatsapp_conversations"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "telefono",
+              "condition": "eq",
+              "keyValue": "={{ $json.telefonoClienteParaEnvio }}"
+            }
+          ]
+        },
+        "returnAll": false,
+        "limit": 1,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "position": [
+        220,
+        500
+      ],
+      "name": "Read Conversation",
+      "notesInFlow": true,
+      "notes": "Sin fila previa sigue igual"
+    },
+    {
+      "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Arma el prompt que se le manda a Claude. Vive en un nodo aparte para que el\n// prompt quede legible acá y no escondido dentro de una expresión del HTTP\n// Request.\nconst item = $input.first().json;\n\nconst PROMPT_SISTEMA = [\n  'Sos el clasificador de mensajes de una inmobiliaria de Córdoba, Argentina.',\n  'Tu única tarea es analizar el mensaje de un cliente y devolver un JSON.',\n  '',\n  'Clasificá el mensaje en EXACTAMENTE uno de estos intents:',\n  '',\n  '- \"consulta_propiedad\": busca propiedades para alquilar o comprar, pregunta',\n  '  por disponibilidad, precios o características de propiedades.',\n  '- \"agendar_visita\": quiere coordinar, reprogramar o cancelar una visita a una',\n  '  propiedad, o propone un día y horario.',\n  '- \"consulta_general\": pregunta por horarios, dirección, requisitos, comisiones,',\n  '  formas de pago, tasaciones o políticas de la inmobiliaria.',\n  '- \"derivar_humano\": pide hablar con una persona, hace un reclamo, plantea algo',\n  '  legal o contractual, o el mensaje no encaja en ninguna de las anteriores.',\n  '',\n  'Extraé también las entidades que aparezcan explícitamente. Si un dato no está',\n  'en el mensaje, poné null. No inventes nada.',\n  '',\n  'Reglas para las entidades:',\n  '- \"operacion\": \"alquiler\" o \"venta\".',\n  '- \"tipo\": \"departamento\", \"casa\", \"ph\" o \"local\".',\n  '- \"barrio\": nombre del barrio tal como lo escribió el cliente.',\n  '- \"dormitorios\": número entero.',\n  '- \"presupuesto\": número sin puntos ni símbolos. \"500 mil\" es 500000.',\n  '- \"moneda\": \"ARS\" o \"USD\". Si habla de dólares o USD, es \"USD\"; si no, \"ARS\".',\n  '- \"fecha_visita\": formato YYYY-MM-DD. Resolvé fechas relativas usando la fecha',\n  '  de hoy que se indica en el mensaje del usuario.',\n  '- \"hora_visita\": formato HH:MM en 24 horas.',\n  '- \"referencia_propiedad\": código tipo \"INM-002\" si lo menciona.',\n  '',\n  'Respondé SOLO con el objeto JSON, sin markdown, sin ```json y sin texto',\n  'alrededor. Formato exacto:',\n  '{\"intent\":\"...\",\"confianza\":0.0,\"entidades\":{\"operacion\":null,\"tipo\":null,\"barrio\":null,\"dormitorios\":null,\"presupuesto\":null,\"moneda\":null,\"fecha_visita\":null,\"hora_visita\":null,\"referencia_propiedad\":null}}',\n  '',\n  '\"confianza\" es un número entre 0 y 1 que indica qué tan seguro estás del intent.',\n].join('\\n');\n\n// Le pasamos la fecha de hoy para que pueda resolver \"el jueves\" o \"mañana\".\nconst hoy = new Date();\nconst fechaHoy = [\n  hoy.getFullYear(),\n  String(hoy.getMonth() + 1).padStart(2, '0'),\n  String(hoy.getDate()).padStart(2, '0'),\n].join('-');\n\nconst mensajeUsuario = [\n  'Fecha de hoy: ' + fechaHoy,\n  '',\n  'Mensaje del cliente:',\n  item.mensaje || '(mensaje vacío)',\n].join('\\n');\n\nreturn [{ json: { ...item, promptSistema: PROMPT_SISTEMA, mensajeUsuario, fechaHoy } }];"
+        "jsCode": "// <<< BEGIN GENERATED — generado por code/scripts/build-workflow.js, no editar a mano >>>\n\n// Lógica de src/conversationMemory.js\n\n/**\n * Memoria de conversación por número de teléfono.\n *\n * Por qué existe: sin esto cada mensaje se clasifica aislado, y una conversación\n * real de WhatsApp no funciona así. \"Busco depto en Nueva Córdoba\" seguido de\n * \"algo de un dormitorio\" son un solo pedido partido en dos: el segundo mensaje\n * no menciona el barrio ni la operación, así que sin contexto el clasificador\n * devuelve entidades casi vacías y la búsqueda arranca de cero.\n *\n * Resuelve dos cosas distintas:\n *\n * 1. **Referencias.** El historial va dentro del prompt para que el modelo\n *    pueda interpretar \"ese\", \"el primero\" o \"algo más barato\".\n * 2. **Acumulación de entidades.** Lo que el cliente ya dijo se fusiona con lo\n *    que dice ahora, así la búsqueda usa el pedido completo y no solo el\n *    último fragmento.\n *\n * Dónde se guarda: en una Data Table de n8n, una fila por teléfono, con el\n * estado serializado como JSON en una columna. Se probó primero con\n * `$getWorkflowStaticData` y **no sirve para esto**: n8n carga la static data\n * al empezar la ejecución y la guarda al terminar, sin bloqueos. Dos mensajes\n * seguidos se solapan (la clasificación tarda varios segundos), las dos\n * ejecuciones parten del mismo snapshot y la última en terminar pisa a la\n * otra — medido en esta demo, con el primer mensaje desapareciendo del\n * historial. La Data Table escribe cuando corre el nodo, no al final, así que\n * el mensaje entrante queda registrado antes de la llamada al LLM.\n *\n * Las funciones son puras: reciben y devuelven objetos, sin tocar n8n. El\n * workflow se encarga de leer y escribir la fila.\n */\n\n// Cuánta inactividad hace que una conversación se considere terminada. Media\n// hora es suficiente para un ida y vuelta de WhatsApp sin arrastrar el\n// contexto de una consulta de ayer a una nueva de hoy.\nconst TTL_INACTIVIDAD_MS = 30 * 60 * 1000;\n\n// Cuántos mensajes del cliente se recuerdan. Alcanza para resolver referencias\n// sin inflar el prompt (y por lo tanto el costo) de cada clasificación.\nconst MAX_MENSAJES = 6;\n\n// Las entidades que tiene sentido arrastrar entre mensajes. Se listan explícito\n// en vez de fusionar todo lo que venga, para que una clave nueva inventada por\n// el modelo no se cuele en la memoria.\nconst ENTIDADES_ACUMULABLES = [\n  'operacion',\n  'tipo',\n  'barrio',\n  'dormitorios',\n  'presupuesto',\n  'moneda',\n  'fecha_visita',\n  'hora_visita',\n  'referencia_propiedad',\n];\n\nconst CONVERSACION_VACIA = { mensajes: [], entidades: {}, actualizadoEn: 0 };\n\nfunction esVacio(valor) {\n  return valor === null || valor === undefined || valor === '';\n}\n\n/**\n * Fusiona lo que el cliente ya había dicho con lo que dice ahora. Un valor\n * nuevo pisa al anterior (el cliente cambió de idea); un valor ausente deja\n * en pie el anterior (el cliente no lo repitió, pero sigue valiendo).\n */\nfunction combinarEntidades(previas, nuevas) {\n  const anteriores = previas || {};\n  const actuales = nuevas || {};\n  const resultado = {};\n\n  for (const clave of ENTIDADES_ACUMULABLES) {\n    const valorNuevo = actuales[clave];\n    resultado[clave] = esVacio(valorNuevo) ? anteriores[clave] ?? null : valorNuevo;\n  }\n\n  return resultado;\n}\n\n/**\n * Interpreta lo que vino de la Data Table. Tolera que la columna llegue como\n * string JSON, como objeto ya parseado, vacía o con basura: ante cualquier\n * duda devuelve una conversación vacía en vez de romper el flujo.\n */\nfunction parseEstado(valor) {\n  let crudo = valor;\n\n  if (typeof crudo === 'string') {\n    try {\n      crudo = JSON.parse(crudo);\n    } catch (error) {\n      return { ...CONVERSACION_VACIA };\n    }\n  }\n\n  if (!crudo || typeof crudo !== 'object') return { ...CONVERSACION_VACIA };\n\n  return {\n    mensajes: Array.isArray(crudo.mensajes) ? crudo.mensajes.filter((m) => m && m.texto) : [],\n    entidades: crudo.entidades && typeof crudo.entidades === 'object' ? crudo.entidades : {},\n    actualizadoEn: Number(crudo.actualizadoEn) || 0,\n  };\n}\n\nfunction serializarEstado(conversacion) {\n  return JSON.stringify(conversacion || CONVERSACION_VACIA);\n}\n\n/**\n * Una conversación sigue viva si el último mensaje entró dentro del TTL. La\n * fila vieja puede seguir en la tabla: se ignora y se pisa en la próxima\n * escritura.\n */\nfunction estaVigente(conversacion, ahora, opciones) {\n  const ttl = (opciones || {}).ttlMs || TTL_INACTIVIDAD_MS;\n  if (!conversacion || !conversacion.actualizadoEn) return false;\n  return ahora - conversacion.actualizadoEn <= ttl;\n}\n\n/**\n * Lo que usa el workflow al leer la fila: parsea y descarta lo vencido.\n *\n * @returns {{mensajes: Array, entidades: object, actualizadoEn: number}} vacía\n *          si no había fila o si la conversación ya venció\n */\nfunction conversacionActiva(valorDeLaFila, ahora, opciones) {\n  const conversacion = parseEstado(valorDeLaFila);\n  return estaVigente(conversacion, ahora, opciones) ? conversacion : { ...CONVERSACION_VACIA };\n}\n\n/**\n * Suma el mensaje entrante al historial. Se llama antes de clasificar, así la\n * ejecución del mensaje siguiente ya lo encuentra escrito.\n */\nfunction agregarMensaje(conversacion, turno, ahora, opciones) {\n  const maxMensajes = (opciones || {}).maxMensajes || MAX_MENSAJES;\n  const base = conversacion || CONVERSACION_VACIA;\n  const datos = turno || {};\n\n  const mensajes = Array.isArray(base.mensajes) ? base.mensajes.slice() : [];\n  const texto = String(datos.mensaje || '').trim();\n  if (texto) {\n    mensajes.push({ texto, intent: datos.intent || null, en: ahora });\n  }\n\n  return {\n    mensajes: mensajes.slice(-maxMensajes),\n    entidades: base.entidades || {},\n    actualizadoEn: ahora,\n  };\n}\n\n/**\n * Fusiona las entidades que extrajo el clasificador. Se llama después de\n * clasificar, con la conversación ya actualizada por agregarMensaje.\n */\nfunction fusionarEntidades(conversacion, entidades, ahora) {\n  const base = conversacion || CONVERSACION_VACIA;\n\n  return {\n    mensajes: Array.isArray(base.mensajes) ? base.mensajes : [],\n    entidades: combinarEntidades(base.entidades, entidades),\n    actualizadoEn: ahora || base.actualizadoEn,\n  };\n}\n\n/**\n * Arma el bloque de contexto que se le manda al modelo. Devuelve '' cuando no\n * hay nada que contar, para no ensuciar el prompt del primer mensaje.\n *\n * @param {object} conversacion estado ya filtrado por vigencia\n * @param {string} mensajeActual se excluye del historial: ya va aparte en el\n *        prompt, y para cuando se arma el contexto puede estar registrado\n */\nfunction formatearContexto(conversacion, mensajeActual) {\n  if (!conversacion) return '';\n\n  const partes = [];\n  const todos = Array.isArray(conversacion.mensajes) ? conversacion.mensajes : [];\n  const actual = String(mensajeActual || '').trim();\n\n  // El mensaje actual puede estar o no en el historial según cuándo se llame;\n  // se saca solo la última aparición para no repetirlo en el prompt.\n  const mensajes = todos.slice();\n  if (actual) {\n    for (let i = mensajes.length - 1; i >= 0; i -= 1) {\n      if (mensajes[i].texto === actual) {\n        mensajes.splice(i, 1);\n        break;\n      }\n    }\n  }\n\n  if (mensajes.length) {\n    partes.push('Mensajes anteriores de este cliente (del más viejo al más nuevo):');\n    mensajes.forEach((mensaje, indice) => {\n      partes.push(`${indice + 1}. \"${mensaje.texto}\"`);\n    });\n  }\n\n  const entidades = conversacion.entidades || {};\n  const yaDichas = ENTIDADES_ACUMULABLES.filter((clave) => !esVacio(entidades[clave]));\n\n  if (yaDichas.length) {\n    if (partes.length) partes.push('');\n    partes.push('Datos que este cliente ya dio en mensajes anteriores:');\n    yaDichas.forEach((clave) => {\n      partes.push(`- ${clave}: ${entidades[clave]}`);\n    });\n  }\n\n  return partes.join('\\n');\n}\n\n// <<< END GENERATED >>>\n\n// Arma el prompt que se le manda al modelo. Vive en un nodo aparte para que el\n// prompt quede legible acá y no escondido dentro de una expresión del HTTP\n// Request.\n//\n// El item que entra es la fila de la Data Table (o vacío si el cliente nunca\n// escribió), así que el mensaje se toma del nodo que lo normalizó.\nconst item = $('Normalize Inbound Message').first().json;\nconst fila = $input.first().json || {};\n\nconst ahora = Date.now();\n// conversacionActiva descarta sola lo que pasó el TTL, así que una fila vieja\n// que quedó en la tabla no arrastra contexto de ayer.\nconst previa = conversacionActiva(fila.estado, ahora);\n\n// El mensaje entrante se suma al historial ya, antes de llamar al LLM: la\n// clasificación tarda varios segundos y si el cliente manda otro mensaje\n// mientras tanto, esa ejecución tiene que encontrarlo escrito.\nconst conMensaje = agregarMensaje(previa, { mensaje: item.mensaje }, ahora);\nconst contexto = formatearContexto(conMensaje, item.mensaje);\n\nconst PROMPT_SISTEMA = [\n  'Sos el clasificador de mensajes de una inmobiliaria de Córdoba, Argentina.',\n  'Tu única tarea es analizar el mensaje de un cliente y devolver un JSON.',\n  '',\n  'Clasificá el mensaje en EXACTAMENTE uno de estos intents:',\n  '',\n  '- \"consulta_propiedad\": busca propiedades para alquilar o comprar, pregunta',\n  '  por disponibilidad, precios o características de propiedades.',\n  '- \"agendar_visita\": quiere coordinar, reprogramar o cancelar una visita a una',\n  '  propiedad, o propone un día y horario.',\n  '- \"consulta_general\": pregunta por horarios, dirección, requisitos, comisiones,',\n  '  formas de pago, tasaciones o políticas de la inmobiliaria.',\n  '- \"derivar_humano\": pide hablar con una persona, hace un reclamo, plantea algo',\n  '  legal o contractual, o el mensaje no encaja en ninguna de las anteriores.',\n  '',\n  'Si el mensaje viene con contexto de mensajes anteriores, usalo: un mensaje',\n  'corto que por sí solo parece ambiguo suele ser la continuación del pedido',\n  'anterior. Clasificá según el pedido completo, no según el fragmento suelto,',\n  'y resolvé las referencias (\"ese\", \"el primero\", \"algo más barato\") contra',\n  'ese contexto.',\n  '',\n  'Extraé también las entidades que aparezcan explícitamente. Si un dato no está',\n  'en el mensaje, poné null. No inventes nada.',\n  '',\n  'Sobre las entidades y el contexto: extraé lo que dice el MENSAJE ACTUAL. Si',\n  'el mensaje continúa un pedido anterior, podés incluir además los datos del',\n  'contexto que sigan valiendo — se combinan igual de forma automática, así que',\n  'repetirlos no molesta y ayuda si algo no llegó a guardarse. Si el cliente',\n  'corrige un dato que ya había dado, poné el valor nuevo: eso pisa al anterior.',\n  '',\n  'Reglas para las entidades:',\n  '- \"operacion\": \"alquiler\" o \"venta\".',\n  '- \"tipo\": \"departamento\", \"casa\", \"ph\" o \"local\".',\n  '- \"barrio\": nombre del barrio tal como lo escribió el cliente.',\n  '- \"dormitorios\": número entero.',\n  '- \"presupuesto\": número sin puntos ni símbolos. \"500 mil\" es 500000.',\n  '- \"moneda\": \"ARS\" o \"USD\". Si habla de dólares o USD, es \"USD\"; si no, \"ARS\".',\n  '- \"fecha_visita\": formato YYYY-MM-DD. Resolvé fechas relativas usando la fecha',\n  '  de hoy que se indica en el mensaje del usuario.',\n  '- \"hora_visita\": formato HH:MM en 24 horas.',\n  '- \"referencia_propiedad\": código tipo \"INM-002\" si lo menciona.',\n  '',\n  'Respondé SOLO con el objeto JSON, sin markdown, sin \\`\\`\\`json y sin texto',\n  'alrededor. Formato exacto:',\n  '{\"intent\":\"...\",\"confianza\":0.0,\"entidades\":{\"operacion\":null,\"tipo\":null,\"barrio\":null,\"dormitorios\":null,\"presupuesto\":null,\"moneda\":null,\"fecha_visita\":null,\"hora_visita\":null,\"referencia_propiedad\":null}}',\n  '',\n  '\"confianza\" es un número entre 0 y 1 que indica qué tan seguro estás del intent.',\n].join('\\n');\n\n// Le pasamos la fecha de hoy para que pueda resolver \"el jueves\" o \"mañana\".\nconst hoy = new Date();\nconst fechaHoy = [\n  hoy.getFullYear(),\n  String(hoy.getMonth() + 1).padStart(2, '0'),\n  String(hoy.getDate()).padStart(2, '0'),\n].join('-');\n\nconst bloques = ['Fecha de hoy: ' + fechaHoy];\nif (contexto) {\n  bloques.push('', '--- Contexto de la conversación ---', contexto, '--- Fin del contexto ---');\n}\nbloques.push('', 'Mensaje actual del cliente:', item.mensaje || '(mensaje vacío)');\n\nreturn [\n  {\n    json: {\n      ...item,\n      promptSistema: PROMPT_SISTEMA,\n      mensajeUsuario: bloques.join('\\n'),\n      fechaHoy,\n      // Lo que escribe el nodo de Data Table que viene justo después.\n      telefono: item.telefonoClienteParaEnvio,\n      estadoConMensaje: serializarEstado(conMensaje),\n      actualizadoEnIso: new Date(ahora).toISOString(),\n      // Para poder ver desde la ejecución qué contexto tenía el modelo.\n      contextoConversacion: contexto || null,\n      entidadesPrevias: previa.entidades,\n    },\n  },\n];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        220,
+        440,
         500
       ],
       "name": "Build Classification Prompt"
     },
     {
       "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "whatsapp_conversations"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "telefono",
+              "condition": "eq",
+              "keyValue": "={{ $json.telefono }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "telefono": "={{ $json.telefono }}",
+            "estado": "={{ $json.estadoConMensaje }}",
+            "actualizadoEn": "={{ $json.actualizadoEnIso }}"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "position": [
+        660,
+        500
+      ],
+      "name": "Remember Inbound Message",
+      "notesInFlow": true,
+      "notes": "Antes del LLM: el próximo mensaje ya lo ve"
+    },
+    {
+      "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// <<< BEGIN GENERATED — generado por code/scripts/build-workflow.js, no editar a mano >>>\n\n// Lógica de src/llmProviders.js\n\n/**\r\n * Config y parsing específicos de cada proveedor de LLM.\r\n *\r\n * Existe para que \"Classify Intent (LLM)\" funcione contra Gemini (tiene free\r\n * tier), Anthropic o Groq sin tocar el resto del flujo — alcanza con cambiar\r\n * las variables de entorno LLM_PROVIDER / LLM_MODEL / LLM_API_URL. Ver el\r\n * README de la demo para el detalle de cómo apuntar a cada uno.\r\n */\r\n\r\nconst PROVEEDOR_POR_DEFECTO = 'gemini';\r\n\r\nconst PROVEEDORES_SOPORTADOS = ['gemini', 'anthropic', 'groq'];\r\n\r\nconst MODELOS_POR_DEFECTO = {\r\n  // Alias estable de Google, no una versión fechada: apunta siempre al\r\n  // flash vigente, así que no se rompe cada vez que Google retira una\r\n  // versión (p. ej. \"gemini-2.5-flash\" empezó a devolver 404 \"no longer\r\n  // available to new users\" mientras se armaba esta demo).\r\n  gemini: 'gemini-flash-latest',\r\n  anthropic: 'claude-sonnet-5',\r\n  groq: 'llama-3.3-70b-versatile',\r\n};\r\n\r\n// Cuánto puede \"razonar\" Gemini antes de responder.\r\n//\r\n// Los modelos Gemini 3+ (a los que apunta hoy gemini-flash-latest) usan\r\n// thinkingLevel; los 2.5 usaban thinkingConfig.thinkingBudget. Mandar\r\n// `thinkingBudget: 0` a un Gemini 3 devuelve 400 INVALID_ARGUMENT — además,\r\n// Flash 3.x directamente no permite apagar el thinking del todo, \"minimal\" es\r\n// lo más bajo posible (verificado contra la API real: con \"minimal\" la\r\n// respuesta vuelve con thoughtsTokenCount = 0).\r\n//\r\n// Importa porque los tokens de razonamiento se descuentan de maxOutputTokens:\r\n// sin este límite el modelo gastaba ~700 tokens pensando y devolvía el JSON\r\n// cortado a la mitad.\r\n//\r\n// Valor especial 'off': omite thinkingConfig por completo, que es lo que hay\r\n// que usar si se apunta LLM_MODEL a un modelo viejo de la familia 2.5, que no\r\n// entiende thinkingLevel.\r\nconst NIVEL_THINKING_POR_DEFECTO = 'minimal';\r\n\r\nfunction normalizarProveedor(proveedor) {\r\n  return String(proveedor || PROVEEDOR_POR_DEFECTO).toLowerCase().trim();\r\n}\r\n\r\n// Schema OpenAPI-subset que espera Gemini en generationConfig.responseSchema.\r\n// A diferencia del JSON Schema estándar, los \"type\" van en MAYÚSCULA (es el\r\n// enum Type del proto de Gemini, no el responseJsonSchema más nuevo que sí\r\n// acepta minúsculas). Con esto Gemini garantiza la forma del JSON de salida\r\n// en vez de dejarla librada al prompt.\r\n//\r\n// Nota: los 4 intents están repetidos acá (no importados de\r\n// parseClassification.js) a propósito. Ambos módulos se inyectan juntos en\r\n// el mismo Code node (\"Parse Classification\" en build-workflow.js), así que\r\n// declarar una segunda constante con el mismo nombre en el mismo scope\r\n// rompería la compilación — ver INTENTS_VALIDOS en parseClassification.js.\r\nfunction campoStringOpcional() {\r\n  return { type: 'STRING', nullable: true };\r\n}\r\n\r\nfunction esquemaClasificacionGemini() {\r\n  return {\r\n    type: 'OBJECT',\r\n    properties: {\r\n      intent: {\r\n        type: 'STRING',\r\n        enum: ['consulta_propiedad', 'agendar_visita', 'consulta_general', 'derivar_humano'],\r\n      },\r\n      confianza: { type: 'NUMBER' },\r\n      entidades: {\r\n        type: 'OBJECT',\r\n        properties: {\r\n          operacion: campoStringOpcional(),\r\n          tipo: campoStringOpcional(),\r\n          barrio: campoStringOpcional(),\r\n          dormitorios: { type: 'INTEGER', nullable: true },\r\n          presupuesto: { type: 'NUMBER', nullable: true },\r\n          moneda: campoStringOpcional(),\r\n          fecha_visita: campoStringOpcional(),\r\n          hora_visita: campoStringOpcional(),\r\n          referencia_propiedad: campoStringOpcional(),\r\n        },\r\n        propertyOrdering: [\r\n          'operacion',\r\n          'tipo',\r\n          'barrio',\r\n          'dormitorios',\r\n          'presupuesto',\r\n          'moneda',\r\n          'fecha_visita',\r\n          'hora_visita',\r\n          'referencia_propiedad',\r\n        ],\r\n      },\r\n    },\r\n    required: ['intent', 'confianza', 'entidades'],\r\n    propertyOrdering: ['intent', 'confianza', 'entidades'],\r\n  };\r\n}\r\n\r\nfunction urlPorDefecto(proveedor, modelo) {\r\n  if (proveedor === 'gemini') {\r\n    return `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`;\r\n  }\r\n  if (proveedor === 'anthropic') return 'https://api.anthropic.com/v1/messages';\r\n  if (proveedor === 'groq') return 'https://api.groq.com/openai/v1/chat/completions';\r\n  return null;\r\n}\r\n\r\n/**\r\n * Arma la request para el proveedor pedido. Devuelve url/headers/body como\r\n * datos planos: quien llama decide cómo pasárselos al HTTP Request node.\r\n *\r\n * @param {object} opciones { proveedor, modelo, apiUrl, promptSistema, mensajeUsuario, nivelThinking }\r\n * @returns {{ url: string, headers: object, body: object }}\r\n */\r\nfunction buildLlmRequest(opciones) {\r\n  const datos = opciones || {};\r\n  const proveedor = normalizarProveedor(datos.proveedor);\r\n  const modelo = datos.modelo || MODELOS_POR_DEFECTO[proveedor] || MODELOS_POR_DEFECTO[PROVEEDOR_POR_DEFECTO];\r\n  const promptSistema = datos.promptSistema || '';\r\n  const mensajeUsuario = datos.mensajeUsuario || '';\r\n\r\n  const url = datos.apiUrl || urlPorDefecto(proveedor, modelo);\r\n  if (!url) {\r\n    throw new Error(\r\n      `Proveedor de LLM desconocido: \"${datos.proveedor}\". Usá uno de: ${PROVEEDORES_SOPORTADOS.join(', ')}; ` +\r\n        'o configurá LLM_API_URL para apuntar a un endpoint compatible.',\r\n    );\r\n  }\r\n\r\n  if (proveedor === 'gemini') {\r\n    const generationConfig = {\r\n      temperature: 0,\r\n      maxOutputTokens: 1500,\r\n      // JSON garantizado por schema, no \"mejor esfuerzo\" vía prompt. No es\r\n      // opcional: sin el schema el modelo inventa los nombres de los campos\r\n      // (\"intencion\", \"clasificacion\") y el whitelist de intents no matchea.\r\n      responseMimeType: 'application/json',\r\n      responseSchema: esquemaClasificacionGemini(),\r\n    };\r\n\r\n    const nivelThinking = String(datos.nivelThinking || NIVEL_THINKING_POR_DEFECTO)\r\n      .toLowerCase()\r\n      .trim();\r\n    if (nivelThinking !== 'off') {\r\n      generationConfig.thinkingConfig = { thinkingLevel: nivelThinking };\r\n    }\r\n\r\n    return {\r\n      url,\r\n      headers: {},\r\n      body: {\r\n        system_instruction: { parts: [{ text: promptSistema }] },\r\n        contents: [{ role: 'user', parts: [{ text: mensajeUsuario }] }],\r\n        generationConfig,\r\n      },\r\n    };\r\n  }\r\n\r\n  if (proveedor === 'groq') {\r\n    return {\r\n      url,\r\n      headers: {},\r\n      body: {\r\n        model: modelo,\r\n        temperature: 0,\r\n        max_tokens: 400,\r\n        messages: [\r\n          { role: 'system', content: promptSistema },\r\n          { role: 'user', content: mensajeUsuario },\r\n        ],\r\n      },\r\n    };\r\n  }\r\n\r\n  // anthropic, y cualquier otro proveedor compatible con la Messages API\r\n  return {\r\n    url,\r\n    headers: { 'anthropic-version': '2023-06-01' },\r\n    body: {\r\n      model: modelo,\r\n      max_tokens: 400,\r\n      temperature: 0,\r\n      system: promptSistema,\r\n      messages: [{ role: 'user', content: mensajeUsuario }],\r\n    },\r\n  };\r\n}\r\n\r\n/**\r\n * Saca el texto de la respuesta cruda de la API. Devuelve null (nunca tira\r\n * error) ante cualquier forma inesperada — por ejemplo, un bloqueo de\r\n * seguridad de Gemini que responde 200 sin \"candidates\". Quien llama trata\r\n * un null exactamente igual que una respuesta no parseable.\r\n *\r\n * @param {string} proveedor\r\n * @param {object} respuesta cuerpo ya parseado como JSON\r\n * @returns {string|null}\r\n */\r\nfunction extractLlmText(proveedor, respuesta) {\r\n  if (!respuesta || typeof respuesta !== 'object') return null;\r\n  const p = normalizarProveedor(proveedor);\r\n\r\n  if (p === 'gemini') {\r\n    const candidato = Array.isArray(respuesta.candidates) ? respuesta.candidates[0] : null;\r\n    const parte = candidato && candidato.content && Array.isArray(candidato.content.parts)\r\n      ? candidato.content.parts[0]\r\n      : null;\r\n    return (parte && typeof parte.text === 'string' && parte.text) || null;\r\n  }\r\n\r\n  if (p === 'groq') {\r\n    const eleccion = Array.isArray(respuesta.choices) ? respuesta.choices[0] : null;\r\n    const contenido = eleccion && eleccion.message ? eleccion.message.content : null;\r\n    return (typeof contenido === 'string' && contenido) || null;\r\n  }\r\n\r\n  // anthropic\r\n  const bloque = Array.isArray(respuesta.content) ? respuesta.content[0] : null;\r\n  return (bloque && typeof bloque.text === 'string' && bloque.text) || null;\r\n}\n\n// <<< END GENERATED >>>\n\nconst item = $input.first().json;\n\nconst { url, headers, body } = buildLlmRequest({\n  proveedor: item.proveedorLlm,\n  modelo: item.modelo || undefined,\n  apiUrl: item.apiUrlLlm || undefined,\n  promptSistema: item.promptSistema,\n  mensajeUsuario: item.mensajeUsuario,\n  nivelThinking: item.nivelThinking || undefined,\n});\n\n// \"Specify Headers > JSON\" y el body del HTTP Request node necesitan un\n// string JSON, no un objeto: si se les pasa un objeto por expresión, n8n lo\n// castea con String() antes de intentar parsearlo como JSON y el resultado\n// es el literal \"[object Object]\", que falla con \"JSON parameter needs to\n// be valid JSON\". Por eso se stringifica acá, no en buildLlmRequest (que\n// devuelve objetos para que sea fácil de testear).\nreturn [\n  {\n    json: {\n      ...item,\n      llmUrl: url,\n      llmHeaders: JSON.stringify(headers),\n      llmBody: JSON.stringify(body),\n    },\n  },\n];"
+        "jsCode": "// <<< BEGIN GENERATED — generado por code/scripts/build-workflow.js, no editar a mano >>>\n\n// Lógica de src/llmProviders.js\n\n/**\r\n * Config y parsing específicos de cada proveedor de LLM.\r\n *\r\n * Existe para que \"Classify Intent (LLM)\" funcione contra Gemini (tiene free\r\n * tier), Anthropic o Groq sin tocar el resto del flujo — alcanza con cambiar\r\n * las variables de entorno LLM_PROVIDER / LLM_MODEL / LLM_API_URL. Ver el\r\n * README de la demo para el detalle de cómo apuntar a cada uno.\r\n */\r\n\r\nconst PROVEEDOR_POR_DEFECTO = 'gemini';\r\n\r\nconst PROVEEDORES_SOPORTADOS = ['gemini', 'anthropic', 'groq'];\r\n\r\nconst MODELOS_POR_DEFECTO = {\r\n  // Alias estable de Google, no una versión fechada: apunta siempre al\r\n  // flash vigente, así que no se rompe cada vez que Google retira una\r\n  // versión (p. ej. \"gemini-2.5-flash\" empezó a devolver 404 \"no longer\r\n  // available to new users\" mientras se armaba esta demo).\r\n  gemini: 'gemini-flash-latest',\r\n  anthropic: 'claude-sonnet-5',\r\n  groq: 'llama-3.3-70b-versatile',\r\n};\r\n\r\n// Cuánto puede \"razonar\" Gemini antes de responder.\r\n//\r\n// Los modelos Gemini 3+ (a los que apunta hoy gemini-flash-latest) usan\r\n// thinkingLevel; los 2.5 usaban thinkingConfig.thinkingBudget. Mandar\r\n// `thinkingBudget: 0` a un Gemini 3 devuelve 400 INVALID_ARGUMENT — además,\r\n// Flash 3.x directamente no permite apagar el thinking del todo, \"minimal\" es\r\n// lo más bajo posible (verificado contra la API real: con \"minimal\" la\r\n// respuesta vuelve con thoughtsTokenCount = 0).\r\n//\r\n// Importa porque los tokens de razonamiento se descuentan de maxOutputTokens:\r\n// sin este límite el modelo gastaba ~700 tokens pensando y devolvía el JSON\r\n// cortado a la mitad.\r\n//\r\n// Valor especial 'off': omite thinkingConfig por completo, que es lo que hay\r\n// que usar si se apunta LLM_MODEL a un modelo viejo de la familia 2.5, que no\r\n// entiende thinkingLevel.\r\nconst NIVEL_THINKING_POR_DEFECTO = 'minimal';\r\n\r\nfunction normalizarProveedor(proveedor) {\r\n  return String(proveedor || PROVEEDOR_POR_DEFECTO).toLowerCase().trim();\r\n}\r\n\r\n// Schema OpenAPI-subset que espera Gemini en generationConfig.responseSchema.\r\n// A diferencia del JSON Schema estándar, los \"type\" van en MAYÚSCULA (es el\r\n// enum Type del proto de Gemini, no el responseJsonSchema más nuevo que sí\r\n// acepta minúsculas). Con esto Gemini garantiza la forma del JSON de salida\r\n// en vez de dejarla librada al prompt.\r\n//\r\n// Nota: los 4 intents están repetidos acá (no importados de\r\n// parseClassification.js) a propósito. Ambos módulos se inyectan juntos en\r\n// el mismo Code node (\"Parse Classification\" en build-workflow.js), así que\r\n// declarar una segunda constante con el mismo nombre en el mismo scope\r\n// rompería la compilación — ver INTENTS_VALIDOS en parseClassification.js.\r\nfunction campoStringOpcional() {\r\n  return { type: 'STRING', nullable: true };\r\n}\r\n\r\nfunction esquemaClasificacionGemini() {\r\n  return {\r\n    type: 'OBJECT',\r\n    properties: {\r\n      intent: {\r\n        type: 'STRING',\r\n        enum: ['consulta_propiedad', 'agendar_visita', 'consulta_general', 'derivar_humano'],\r\n      },\r\n      confianza: { type: 'NUMBER' },\r\n      entidades: {\r\n        type: 'OBJECT',\r\n        properties: {\r\n          operacion: campoStringOpcional(),\r\n          tipo: campoStringOpcional(),\r\n          barrio: campoStringOpcional(),\r\n          dormitorios: { type: 'INTEGER', nullable: true },\r\n          presupuesto: { type: 'NUMBER', nullable: true },\r\n          moneda: campoStringOpcional(),\r\n          fecha_visita: campoStringOpcional(),\r\n          hora_visita: campoStringOpcional(),\r\n          referencia_propiedad: campoStringOpcional(),\r\n        },\r\n        propertyOrdering: [\r\n          'operacion',\r\n          'tipo',\r\n          'barrio',\r\n          'dormitorios',\r\n          'presupuesto',\r\n          'moneda',\r\n          'fecha_visita',\r\n          'hora_visita',\r\n          'referencia_propiedad',\r\n        ],\r\n      },\r\n    },\r\n    required: ['intent', 'confianza', 'entidades'],\r\n    propertyOrdering: ['intent', 'confianza', 'entidades'],\r\n  };\r\n}\r\n\r\nfunction urlPorDefecto(proveedor, modelo) {\r\n  if (proveedor === 'gemini') {\r\n    return `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`;\r\n  }\r\n  if (proveedor === 'anthropic') return 'https://api.anthropic.com/v1/messages';\r\n  if (proveedor === 'groq') return 'https://api.groq.com/openai/v1/chat/completions';\r\n  return null;\r\n}\r\n\r\n/**\r\n * Arma la request para el proveedor pedido. Devuelve url/headers/body como\r\n * datos planos: quien llama decide cómo pasárselos al HTTP Request node.\r\n *\r\n * @param {object} opciones { proveedor, modelo, apiUrl, promptSistema, mensajeUsuario, nivelThinking }\r\n * @returns {{ url: string, headers: object, body: object }}\r\n */\r\nfunction buildLlmRequest(opciones) {\r\n  const datos = opciones || {};\r\n  const proveedor = normalizarProveedor(datos.proveedor);\r\n  const modelo = datos.modelo || MODELOS_POR_DEFECTO[proveedor] || MODELOS_POR_DEFECTO[PROVEEDOR_POR_DEFECTO];\r\n  const promptSistema = datos.promptSistema || '';\r\n  const mensajeUsuario = datos.mensajeUsuario || '';\r\n\r\n  const url = datos.apiUrl || urlPorDefecto(proveedor, modelo);\r\n  if (!url) {\r\n    throw new Error(\r\n      `Proveedor de LLM desconocido: \"${datos.proveedor}\". Usá uno de: ${PROVEEDORES_SOPORTADOS.join(', ')}; ` +\r\n        'o configurá LLM_API_URL para apuntar a un endpoint compatible.',\r\n    );\r\n  }\r\n\r\n  if (proveedor === 'gemini') {\r\n    const generationConfig = {\r\n      temperature: 0,\r\n      maxOutputTokens: 1500,\r\n      // JSON garantizado por schema, no \"mejor esfuerzo\" vía prompt. No es\r\n      // opcional: sin el schema el modelo inventa los nombres de los campos\r\n      // (\"intencion\", \"clasificacion\") y el whitelist de intents no matchea.\r\n      responseMimeType: 'application/json',\r\n      responseSchema: esquemaClasificacionGemini(),\r\n    };\r\n\r\n    const nivelThinking = String(datos.nivelThinking || NIVEL_THINKING_POR_DEFECTO)\r\n      .toLowerCase()\r\n      .trim();\r\n    if (nivelThinking !== 'off') {\r\n      generationConfig.thinkingConfig = { thinkingLevel: nivelThinking };\r\n    }\r\n\r\n    return {\r\n      url,\r\n      headers: {},\r\n      body: {\r\n        system_instruction: { parts: [{ text: promptSistema }] },\r\n        contents: [{ role: 'user', parts: [{ text: mensajeUsuario }] }],\r\n        generationConfig,\r\n      },\r\n    };\r\n  }\r\n\r\n  if (proveedor === 'groq') {\r\n    return {\r\n      url,\r\n      headers: {},\r\n      body: {\r\n        model: modelo,\r\n        temperature: 0,\r\n        max_tokens: 400,\r\n        messages: [\r\n          { role: 'system', content: promptSistema },\r\n          { role: 'user', content: mensajeUsuario },\r\n        ],\r\n      },\r\n    };\r\n  }\r\n\r\n  // anthropic, y cualquier otro proveedor compatible con la Messages API\r\n  return {\r\n    url,\r\n    headers: { 'anthropic-version': '2023-06-01' },\r\n    body: {\r\n      model: modelo,\r\n      max_tokens: 400,\r\n      temperature: 0,\r\n      system: promptSistema,\r\n      messages: [{ role: 'user', content: mensajeUsuario }],\r\n    },\r\n  };\r\n}\r\n\r\n/**\r\n * Saca el texto de la respuesta cruda de la API. Devuelve null (nunca tira\r\n * error) ante cualquier forma inesperada — por ejemplo, un bloqueo de\r\n * seguridad de Gemini que responde 200 sin \"candidates\". Quien llama trata\r\n * un null exactamente igual que una respuesta no parseable.\r\n *\r\n * @param {string} proveedor\r\n * @param {object} respuesta cuerpo ya parseado como JSON\r\n * @returns {string|null}\r\n */\r\nfunction extractLlmText(proveedor, respuesta) {\r\n  if (!respuesta || typeof respuesta !== 'object') return null;\r\n  const p = normalizarProveedor(proveedor);\r\n\r\n  if (p === 'gemini') {\r\n    const candidato = Array.isArray(respuesta.candidates) ? respuesta.candidates[0] : null;\r\n    const parte = candidato && candidato.content && Array.isArray(candidato.content.parts)\r\n      ? candidato.content.parts[0]\r\n      : null;\r\n    return (parte && typeof parte.text === 'string' && parte.text) || null;\r\n  }\r\n\r\n  if (p === 'groq') {\r\n    const eleccion = Array.isArray(respuesta.choices) ? respuesta.choices[0] : null;\r\n    const contenido = eleccion && eleccion.message ? eleccion.message.content : null;\r\n    return (typeof contenido === 'string' && contenido) || null;\r\n  }\r\n\r\n  // anthropic\r\n  const bloque = Array.isArray(respuesta.content) ? respuesta.content[0] : null;\r\n  return (bloque && typeof bloque.text === 'string' && bloque.text) || null;\r\n}\n\n// <<< END GENERATED >>>\n\n// El nodo anterior es la escritura en la Data Table, que devuelve la fila:\n// el prompt se toma de donde se armó.\nconst item = $('Build Classification Prompt').first().json;\n\nconst { url, headers, body } = buildLlmRequest({\n  proveedor: item.proveedorLlm,\n  modelo: item.modelo || undefined,\n  apiUrl: item.apiUrlLlm || undefined,\n  promptSistema: item.promptSistema,\n  mensajeUsuario: item.mensajeUsuario,\n  nivelThinking: item.nivelThinking || undefined,\n});\n\n// \"Specify Headers > JSON\" y el body del HTTP Request node necesitan un\n// string JSON, no un objeto: si se les pasa un objeto por expresión, n8n lo\n// castea con String() antes de intentar parsearlo como JSON y el resultado\n// es el literal \"[object Object]\", que falla con \"JSON parameter needs to\n// be valid JSON\". Por eso se stringifica acá, no en buildLlmRequest (que\n// devuelve objetos para que sea fácil de testear).\nreturn [\n  {\n    json: {\n      ...item,\n      llmUrl: url,\n      llmHeaders: JSON.stringify(headers),\n      llmBody: JSON.stringify(body),\n    },\n  },\n];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        440,
+        880,
         500
       ],
       "name": "Build LLM Request"
@@ -83,7 +165,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        660,
+        1100,
         500
       ],
       "name": "Classify Intent (LLM)",
@@ -108,7 +190,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        880,
+        1320,
         420
       ],
       "name": "Parse Classification"
@@ -116,15 +198,28 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// <<< BEGIN GENERATED — generado por code/scripts/build-workflow.js, no editar a mano >>>\n\n// Lógica de src/llmFailureReason.js\n\n/**\n * Traduce el fallo del llamado al LLM a un motivo legible por una persona.\n *\n * Por qué existe: cuando el clasificador falla, el motivo termina dentro del\n * WhatsApp que recibe el dueño de la inmobiliaria. Pegar ahí el `message` crudo\n * del error filtra copy interno de n8n a alguien que no tiene idea de qué es\n * n8n — un 429 de Gemini llega como *\"Try spacing your requests out using the\n * batching settings under 'Options'\"*, que además le sugiere tocar una\n * configuración que no existe en su mundo.\n *\n * El HTTP node deja el código de estado en `error.status`, así que se mapea eso\n * y el `message` crudo queda solo como último recurso.\n */\n\nconst MOTIVO_POR_ESTADO = {\n  401: 'la credencial del proveedor fue rechazada',\n  403: 'la credencial del proveedor fue rechazada',\n  404: 'el modelo configurado ya no está disponible',\n  408: 'el proveedor tardó demasiado en responder',\n  429: 'se superó el límite de consultas del proveedor',\n};\n\nfunction motivoPorEstado(estado) {\n  if (MOTIVO_POR_ESTADO[estado]) return MOTIVO_POR_ESTADO[estado];\n  if (estado >= 500 && estado < 600) return 'el proveedor tuvo un error interno';\n  if (estado >= 400 && estado < 500) return 'el proveedor rechazó la consulta';\n  return null;\n}\n\n/**\n * @param {object} fallo el item que llega por la rama de error del HTTP node\n * @param {string} proveedor gemini | anthropic | groq\n * @returns {string} motivo listo para mostrar, sin jerga de n8n\n */\nfunction describeLlmFailure(fallo, proveedor) {\n  const error = (fallo && fallo.error) || fallo || {};\n  const estado = Number(error.status || error.httpCode || 0);\n\n  // Con el código de estado alcanza: es estable y no arrastra copy de n8n.\n  let motivo = motivoPorEstado(estado);\n\n  if (!motivo) {\n    // Sin estado, el fallo es de red (DNS, timeout, conexión cortada). El\n    // `code` de axios es más corto y estable que el `message`.\n    const codigo = String(error.code || '').toUpperCase();\n    if (codigo === 'ECONNABORTED' || codigo === 'ETIMEDOUT') {\n      motivo = 'el proveedor tardó demasiado en responder';\n    } else if (codigo) {\n      motivo = 'no se pudo conectar con el proveedor';\n    }\n  }\n\n  // Último recurso: el mensaje crudo, para no perder información si aparece\n  // una forma de error que no previmos.\n  if (!motivo) {\n    motivo = String(error.message || 'error desconocido');\n  }\n\n  const nombreProveedor = proveedor || 'desconocido';\n  const sufijoEstado = estado ? ` (HTTP ${estado})` : '';\n\n  return `El clasificador de IA (${nombreProveedor}) no respondió: ${motivo}${sufijoEstado}`;\n}\n\n// <<< END GENERATED >>>\n\n// Rama de error del llamado al LLM: si la API falló después de los reintentos,\n// el cliente no se queda sin respuesta. Se lo trata como derivación a un humano\n// y el dueño recibe el aviso.\nconst contexto = $('Normalize Inbound Message').first().json;\nconst fallo = $input.first().json;\n\nreturn [\n  {\n    json: {\n      ...contexto,\n      intent: 'derivar_humano',\n      confianza: 0,\n      entidades: {},\n      clasificadorOk: false,\n      // El motivo lo lee una persona por WhatsApp, no un desarrollador: se\n      // traduce el error en vez de pegar el mensaje crudo del HTTP node.\n      motivoDerivacion: describeLlmFailure(fallo, contexto.proveedorLlm),\n    },\n  },\n];"
+        "jsCode": "// <<< BEGIN GENERATED — generado por code/scripts/build-workflow.js, no editar a mano >>>\n\n// Lógica de src/llmFailureReason.js\n\n/**\r\n * Traduce el fallo del llamado al LLM a un motivo legible por una persona.\r\n *\r\n * Por qué existe: cuando el clasificador falla, el motivo termina dentro del\r\n * WhatsApp que recibe el dueño de la inmobiliaria. Pegar ahí el `message` crudo\r\n * del error filtra copy interno de n8n a alguien que no tiene idea de qué es\r\n * n8n — un 429 de Gemini llega como *\"Try spacing your requests out using the\r\n * batching settings under 'Options'\"*, que además le sugiere tocar una\r\n * configuración que no existe en su mundo.\r\n *\r\n * El HTTP node deja el código de estado en `error.status`, así que se mapea eso\r\n * y el `message` crudo queda solo como último recurso.\r\n */\r\n\r\nconst MOTIVO_POR_ESTADO = {\r\n  401: 'la credencial del proveedor fue rechazada',\r\n  403: 'la credencial del proveedor fue rechazada',\r\n  404: 'el modelo configurado ya no está disponible',\r\n  408: 'el proveedor tardó demasiado en responder',\r\n  429: 'se superó el límite de consultas del proveedor',\r\n};\r\n\r\nfunction motivoPorEstado(estado) {\r\n  if (MOTIVO_POR_ESTADO[estado]) return MOTIVO_POR_ESTADO[estado];\r\n  if (estado >= 500 && estado < 600) return 'el proveedor tuvo un error interno';\r\n  if (estado >= 400 && estado < 500) return 'el proveedor rechazó la consulta';\r\n  return null;\r\n}\r\n\r\n/**\r\n * @param {object} fallo el item que llega por la rama de error del HTTP node\r\n * @param {string} proveedor gemini | anthropic | groq\r\n * @returns {string} motivo listo para mostrar, sin jerga de n8n\r\n */\r\nfunction describeLlmFailure(fallo, proveedor) {\r\n  const error = (fallo && fallo.error) || fallo || {};\r\n  const estado = Number(error.status || error.httpCode || 0);\r\n\r\n  // Con el código de estado alcanza: es estable y no arrastra copy de n8n.\r\n  let motivo = motivoPorEstado(estado);\r\n\r\n  if (!motivo) {\r\n    // Sin estado, el fallo es de red (DNS, timeout, conexión cortada). El\r\n    // `code` de axios es más corto y estable que el `message`.\r\n    const codigo = String(error.code || '').toUpperCase();\r\n    if (codigo === 'ECONNABORTED' || codigo === 'ETIMEDOUT') {\r\n      motivo = 'el proveedor tardó demasiado en responder';\r\n    } else if (codigo) {\r\n      motivo = 'no se pudo conectar con el proveedor';\r\n    }\r\n  }\r\n\r\n  // Último recurso: el mensaje crudo, para no perder información si aparece\r\n  // una forma de error que no previmos.\r\n  if (!motivo) {\r\n    motivo = String(error.message || 'error desconocido');\r\n  }\r\n\r\n  const nombreProveedor = proveedor || 'desconocido';\r\n  const sufijoEstado = estado ? ` (HTTP ${estado})` : '';\r\n\r\n  return `El clasificador de IA (${nombreProveedor}) no respondió: ${motivo}${sufijoEstado}`;\r\n}\n\n// <<< END GENERATED >>>\n\n// Rama de error del llamado al LLM: si la API falló después de los reintentos,\n// el cliente no se queda sin respuesta. Se lo trata como derivación a un humano\n// y el dueño recibe el aviso.\nconst contexto = $('Normalize Inbound Message').first().json;\nconst fallo = $input.first().json;\n\nreturn [\n  {\n    json: {\n      ...contexto,\n      intent: 'derivar_humano',\n      confianza: 0,\n      entidades: {},\n      clasificadorOk: false,\n      // El motivo lo lee una persona por WhatsApp, no un desarrollador: se\n      // traduce el error en vez de pegar el mensaje crudo del HTTP node.\n      motivoDerivacion: describeLlmFailure(fallo, contexto.proveedorLlm),\n    },\n  },\n];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        880,
+        1320,
         620
       ],
       "name": "Build Fallback Classification"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// <<< BEGIN GENERATED — generado por code/scripts/build-workflow.js, no editar a mano >>>\n\n// Lógica de src/conversationMemory.js\n\n/**\n * Memoria de conversación por número de teléfono.\n *\n * Por qué existe: sin esto cada mensaje se clasifica aislado, y una conversación\n * real de WhatsApp no funciona así. \"Busco depto en Nueva Córdoba\" seguido de\n * \"algo de un dormitorio\" son un solo pedido partido en dos: el segundo mensaje\n * no menciona el barrio ni la operación, así que sin contexto el clasificador\n * devuelve entidades casi vacías y la búsqueda arranca de cero.\n *\n * Resuelve dos cosas distintas:\n *\n * 1. **Referencias.** El historial va dentro del prompt para que el modelo\n *    pueda interpretar \"ese\", \"el primero\" o \"algo más barato\".\n * 2. **Acumulación de entidades.** Lo que el cliente ya dijo se fusiona con lo\n *    que dice ahora, así la búsqueda usa el pedido completo y no solo el\n *    último fragmento.\n *\n * Dónde se guarda: en una Data Table de n8n, una fila por teléfono, con el\n * estado serializado como JSON en una columna. Se probó primero con\n * `$getWorkflowStaticData` y **no sirve para esto**: n8n carga la static data\n * al empezar la ejecución y la guarda al terminar, sin bloqueos. Dos mensajes\n * seguidos se solapan (la clasificación tarda varios segundos), las dos\n * ejecuciones parten del mismo snapshot y la última en terminar pisa a la\n * otra — medido en esta demo, con el primer mensaje desapareciendo del\n * historial. La Data Table escribe cuando corre el nodo, no al final, así que\n * el mensaje entrante queda registrado antes de la llamada al LLM.\n *\n * Las funciones son puras: reciben y devuelven objetos, sin tocar n8n. El\n * workflow se encarga de leer y escribir la fila.\n */\n\n// Cuánta inactividad hace que una conversación se considere terminada. Media\n// hora es suficiente para un ida y vuelta de WhatsApp sin arrastrar el\n// contexto de una consulta de ayer a una nueva de hoy.\nconst TTL_INACTIVIDAD_MS = 30 * 60 * 1000;\n\n// Cuántos mensajes del cliente se recuerdan. Alcanza para resolver referencias\n// sin inflar el prompt (y por lo tanto el costo) de cada clasificación.\nconst MAX_MENSAJES = 6;\n\n// Las entidades que tiene sentido arrastrar entre mensajes. Se listan explícito\n// en vez de fusionar todo lo que venga, para que una clave nueva inventada por\n// el modelo no se cuele en la memoria.\nconst ENTIDADES_ACUMULABLES = [\n  'operacion',\n  'tipo',\n  'barrio',\n  'dormitorios',\n  'presupuesto',\n  'moneda',\n  'fecha_visita',\n  'hora_visita',\n  'referencia_propiedad',\n];\n\nconst CONVERSACION_VACIA = { mensajes: [], entidades: {}, actualizadoEn: 0 };\n\nfunction esVacio(valor) {\n  return valor === null || valor === undefined || valor === '';\n}\n\n/**\n * Fusiona lo que el cliente ya había dicho con lo que dice ahora. Un valor\n * nuevo pisa al anterior (el cliente cambió de idea); un valor ausente deja\n * en pie el anterior (el cliente no lo repitió, pero sigue valiendo).\n */\nfunction combinarEntidades(previas, nuevas) {\n  const anteriores = previas || {};\n  const actuales = nuevas || {};\n  const resultado = {};\n\n  for (const clave of ENTIDADES_ACUMULABLES) {\n    const valorNuevo = actuales[clave];\n    resultado[clave] = esVacio(valorNuevo) ? anteriores[clave] ?? null : valorNuevo;\n  }\n\n  return resultado;\n}\n\n/**\n * Interpreta lo que vino de la Data Table. Tolera que la columna llegue como\n * string JSON, como objeto ya parseado, vacía o con basura: ante cualquier\n * duda devuelve una conversación vacía en vez de romper el flujo.\n */\nfunction parseEstado(valor) {\n  let crudo = valor;\n\n  if (typeof crudo === 'string') {\n    try {\n      crudo = JSON.parse(crudo);\n    } catch (error) {\n      return { ...CONVERSACION_VACIA };\n    }\n  }\n\n  if (!crudo || typeof crudo !== 'object') return { ...CONVERSACION_VACIA };\n\n  return {\n    mensajes: Array.isArray(crudo.mensajes) ? crudo.mensajes.filter((m) => m && m.texto) : [],\n    entidades: crudo.entidades && typeof crudo.entidades === 'object' ? crudo.entidades : {},\n    actualizadoEn: Number(crudo.actualizadoEn) || 0,\n  };\n}\n\nfunction serializarEstado(conversacion) {\n  return JSON.stringify(conversacion || CONVERSACION_VACIA);\n}\n\n/**\n * Una conversación sigue viva si el último mensaje entró dentro del TTL. La\n * fila vieja puede seguir en la tabla: se ignora y se pisa en la próxima\n * escritura.\n */\nfunction estaVigente(conversacion, ahora, opciones) {\n  const ttl = (opciones || {}).ttlMs || TTL_INACTIVIDAD_MS;\n  if (!conversacion || !conversacion.actualizadoEn) return false;\n  return ahora - conversacion.actualizadoEn <= ttl;\n}\n\n/**\n * Lo que usa el workflow al leer la fila: parsea y descarta lo vencido.\n *\n * @returns {{mensajes: Array, entidades: object, actualizadoEn: number}} vacía\n *          si no había fila o si la conversación ya venció\n */\nfunction conversacionActiva(valorDeLaFila, ahora, opciones) {\n  const conversacion = parseEstado(valorDeLaFila);\n  return estaVigente(conversacion, ahora, opciones) ? conversacion : { ...CONVERSACION_VACIA };\n}\n\n/**\n * Suma el mensaje entrante al historial. Se llama antes de clasificar, así la\n * ejecución del mensaje siguiente ya lo encuentra escrito.\n */\nfunction agregarMensaje(conversacion, turno, ahora, opciones) {\n  const maxMensajes = (opciones || {}).maxMensajes || MAX_MENSAJES;\n  const base = conversacion || CONVERSACION_VACIA;\n  const datos = turno || {};\n\n  const mensajes = Array.isArray(base.mensajes) ? base.mensajes.slice() : [];\n  const texto = String(datos.mensaje || '').trim();\n  if (texto) {\n    mensajes.push({ texto, intent: datos.intent || null, en: ahora });\n  }\n\n  return {\n    mensajes: mensajes.slice(-maxMensajes),\n    entidades: base.entidades || {},\n    actualizadoEn: ahora,\n  };\n}\n\n/**\n * Fusiona las entidades que extrajo el clasificador. Se llama después de\n * clasificar, con la conversación ya actualizada por agregarMensaje.\n */\nfunction fusionarEntidades(conversacion, entidades, ahora) {\n  const base = conversacion || CONVERSACION_VACIA;\n\n  return {\n    mensajes: Array.isArray(base.mensajes) ? base.mensajes : [],\n    entidades: combinarEntidades(base.entidades, entidades),\n    actualizadoEn: ahora || base.actualizadoEn,\n  };\n}\n\n/**\n * Arma el bloque de contexto que se le manda al modelo. Devuelve '' cuando no\n * hay nada que contar, para no ensuciar el prompt del primer mensaje.\n *\n * @param {object} conversacion estado ya filtrado por vigencia\n * @param {string} mensajeActual se excluye del historial: ya va aparte en el\n *        prompt, y para cuando se arma el contexto puede estar registrado\n */\nfunction formatearContexto(conversacion, mensajeActual) {\n  if (!conversacion) return '';\n\n  const partes = [];\n  const todos = Array.isArray(conversacion.mensajes) ? conversacion.mensajes : [];\n  const actual = String(mensajeActual || '').trim();\n\n  // El mensaje actual puede estar o no en el historial según cuándo se llame;\n  // se saca solo la última aparición para no repetirlo en el prompt.\n  const mensajes = todos.slice();\n  if (actual) {\n    for (let i = mensajes.length - 1; i >= 0; i -= 1) {\n      if (mensajes[i].texto === actual) {\n        mensajes.splice(i, 1);\n        break;\n      }\n    }\n  }\n\n  if (mensajes.length) {\n    partes.push('Mensajes anteriores de este cliente (del más viejo al más nuevo):');\n    mensajes.forEach((mensaje, indice) => {\n      partes.push(`${indice + 1}. \"${mensaje.texto}\"`);\n    });\n  }\n\n  const entidades = conversacion.entidades || {};\n  const yaDichas = ENTIDADES_ACUMULABLES.filter((clave) => !esVacio(entidades[clave]));\n\n  if (yaDichas.length) {\n    if (partes.length) partes.push('');\n    partes.push('Datos que este cliente ya dio en mensajes anteriores:');\n    yaDichas.forEach((clave) => {\n      partes.push(`- ${clave}: ${entidades[clave]}`);\n    });\n  }\n\n  return partes.join('\\n');\n}\n\n// <<< END GENERATED >>>\n\n// Acá convergen las dos ramas del clasificador (la normal y la de fallback),\n// así que la memoria se actualiza también cuando el LLM falló: el cliente dijo\n// lo que dijo, más allá de que hayamos podido clasificarlo.\nconst item = $input.first().json;\nconst armado = $('Build Classification Prompt').first().json;\nconst ahora = Date.now();\n\n// El historial ya se guardó antes de clasificar; acá solo se le suman las\n// entidades que extrajo el modelo.\nconst conMensaje = parseEstado(armado.estadoConMensaje);\nconst conversacion = fusionarEntidades(conMensaje, item.entidades, ahora);\n\n// Las entidades acumuladas reemplazan a las del mensaje suelto antes del ruteo:\n// es lo que hace que \"algo de un dormitorio\" siga buscando en Nueva Córdoba.\n// Las del mensaje quedan aparte para poder debuggear qué aportó cada turno.\nreturn [\n  {\n    json: {\n      ...item,\n      entidades: conversacion.entidades,\n      entidadesDelMensaje: item.entidades || {},\n      mensajesEnMemoria: conversacion.mensajes.length,\n      telefono: armado.telefono,\n      estadoFinal: serializarEstado(conversacion),\n      actualizadoEnIso: new Date(ahora).toISOString(),\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        500
+      ],
+      "name": "Update Conversation Memory"
     },
     {
       "parameters": {
@@ -235,7 +330,7 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.4,
       "position": [
-        1100,
+        1760,
         500
       ],
       "name": "Route by Intent"
@@ -248,7 +343,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1340,
+        2000,
         100
       ],
       "name": "Match Properties"
@@ -261,7 +356,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1560,
+        2220,
         100
       ],
       "name": "Format Property Reply"
@@ -274,7 +369,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1340,
+        2000,
         320
       ],
       "name": "Validate Visit Request"
@@ -287,7 +382,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1560,
+        2220,
         320
       ],
       "name": "Append Visit to Mock Spreadsheet"
@@ -300,7 +395,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1780,
+        2440,
         320
       ],
       "name": "Format Scheduling Reply"
@@ -328,7 +423,7 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
       "position": [
-        1560,
+        2220,
         500
       ],
       "name": "Log Visit to Google Sheets",
@@ -344,7 +439,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1340,
+        2000,
         680
       ],
       "name": "Answer FAQ"
@@ -357,7 +452,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1340,
+        2000,
         880
       ],
       "name": "Build Handoff Messages"
@@ -375,7 +470,7 @@
       "type": "n8n-nodes-base.whatsApp",
       "typeVersion": 1.1,
       "position": [
-        1560,
+        2220,
         880
       ],
       "name": "Notify Owner (WhatsApp)",
@@ -400,7 +495,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1780,
+        2440,
         880
       ],
       "name": "Format Handoff Reply"
@@ -418,7 +513,7 @@
       "type": "n8n-nodes-base.whatsApp",
       "typeVersion": 1.1,
       "position": [
-        2040,
+        2700,
         500
       ],
       "name": "Send WhatsApp Reply (WhatsApp Cloud)",
@@ -443,7 +538,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2260,
+        2920,
         500
       ],
       "name": "Log Delivery Result"
@@ -482,20 +577,35 @@
       "parameters": {
         "content": "## 2. Classify with an LLM\n\nProvider-agnostic by design: `Build LLM Request` reads\n`LLM_PROVIDER` (gemini by default, or anthropic/groq),\n`LLM_MODEL` and `LLM_API_URL` and builds the right URL,\nheaders and body for that provider — see the README for\nexample request bodies of each one.\n\nOne call returns both the intent and the extracted entities\n(operation, property type, neighbourhood, bedrooms, budget,\nvisit date/time), because the property search needs them anyway.\n\n**Error handling:** the HTTP node retries 3 times. If it still\nfails, the error output feeds `Build Fallback Classification`,\nwhich forces `derivar_humano` so the customer always gets an\nanswer and the owner is notified.\n\n`Parse Classification` never trusts the model: it re-validates\nthe JSON, the intent value and the confidence score, using the\nresponse shape of whichever provider is configured. If the JSON\ncan't be parsed, the raw text is logged (console.error) and also\nkept on the item as `textoCrudoSinParsear`, so a bad response is\ndebuggable straight from the execution — no need to reproduce it.\n\n**Gemini-specific:** `gemini-flash-latest` is a thinking model and\nreasoning tokens count against `maxOutputTokens` — left at the\ndefault it burns ~700 of them and the JSON comes back truncated\nmid-object. Hence `thinkingConfig.thinkingLevel: \"minimal\"` (must\nbe `thinkingLevel`, not the 2.5-era `thinkingBudget`, which Gemini\n3.x rejects with a 400). The request also sets\n`responseMimeType: \"application/json\"` + `responseSchema` — without\nthe schema the model invents Spanish field names (`intencion`) and\nthe intent whitelist stops matching.",
         "height": 680,
-        "width": 960,
+        "width": 1140,
         "color": 5
       },
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        200,
+        420,
         280
       ],
       "name": "Sticky Note — 2. Classify with an LLM"
     },
     {
       "parameters": {
-        "content": "## 3. Route\n\nFour outputs, one per intent.\n\nUnknown values fall back\nto `derivar_humano`.",
+        "content": "## 3. Conversation memory\n\nOne row per phone number in the `whatsapp_conversations` data table: the last 6 messages plus\nthe entities gathered so far, dropped after 30 minutes of inactivity.\n\nThe inbound message is written **before** the LLM call, so a second message sent while this one\nis still being classified already finds it. Entities are merged after classification, at the end\nof the flow where every branch converges.\n\n⚠️ Not `$getWorkflowStaticData`: that loads at the start of the execution and saves at the end,\nso two overlapping messages both start from the same snapshot and the last one to finish wins.",
+        "height": 300,
+        "width": 700,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        180,
+        -220
+      ],
+      "name": "Sticky Note — 3. Conversation memory"
+    },
+    {
+      "parameters": {
+        "content": "## 4. Route\n\nFour outputs, one per intent.\n\nUnknown values fall back\nto `derivar_humano`.",
         "height": 280,
         "width": 260,
         "color": 6
@@ -503,14 +613,14 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        1060,
+        1720,
         380
       ],
-      "name": "Sticky Note — 3. Route"
+      "name": "Sticky Note — 4. Route"
     },
     {
       "parameters": {
-        "content": "## 4. Property search\n\nFilters the mock catalogue (10 properties in Córdoba) and scores the\nmatches. If nothing matches exactly it relaxes the neighbourhood first\nand then widens the budget by 15%, instead of replying \"nothing found\".",
+        "content": "## 5. Property search\n\nFilters the mock catalogue (10 properties in Córdoba) and scores the\nmatches. If nothing matches exactly it relaxes the neighbourhood first\nand then widens the budget by 15%, instead of replying \"nothing found\".",
         "height": 240,
         "width": 700,
         "color": 3
@@ -518,14 +628,14 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        1300,
+        1960,
         -60
       ],
-      "name": "Sticky Note — 4. Property search"
+      "name": "Sticky Note — 5. Property search"
     },
     {
       "parameters": {
-        "content": "## 5. Visit scheduling\n\nValidates that the date/time is real, in the future and within business\nhours (Mon–Fri 9–19, Sat 9–13). Missing data is asked back to the customer.\n\nThe mock spreadsheet uses `$getWorkflowStaticData`, so it persists across\nproduction executions with zero setup. Note it is **not** persisted in\nmanual editor runs. The disabled Google Sheets node shows the production path.",
+        "content": "## 6. Visit scheduling\n\nValidates that the date/time is real, in the future and within business\nhours (Mon–Fri 9–19, Sat 9–13). Missing data is asked back to the customer.\n\nThe mock spreadsheet uses `$getWorkflowStaticData`, so it persists across\nproduction executions with zero setup. Note it is **not** persisted in\nmanual editor runs. The disabled Google Sheets node shows the production path.",
         "height": 280,
         "width": 700,
         "color": 3
@@ -533,14 +643,14 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        1300,
+        1960,
         200
       ],
-      "name": "Sticky Note — 5. Visit scheduling"
+      "name": "Sticky Note — 6. Visit scheduling"
     },
     {
       "parameters": {
-        "content": "## 6. General questions\n\nAnswered from a static FAQ\nset by keyword matching —\nno LLM call. It is instant,\ncosts no tokens and always\ngives the same answer for\nfacts like fees or\nrequirements.",
+        "content": "## 7. General questions\n\nAnswered from a static FAQ\nset by keyword matching —\nno LLM call. It is instant,\ncosts no tokens and always\ngives the same answer for\nfacts like fees or\nrequirements.",
         "height": 260,
         "width": 260,
         "color": 3
@@ -548,14 +658,14 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        1300,
+        1960,
         600
       ],
-      "name": "Sticky Note — 6. General questions"
+      "name": "Sticky Note — 7. General questions"
     },
     {
       "parameters": {
-        "content": "## 7. Human handoff\n\nSends two messages: an internal alert to the agency owner with the lead\ndetails, and an acknowledgement to the customer. If the owner notification\nfails, the customer still gets their reply.",
+        "content": "## 8. Human handoff\n\nSends two messages: an internal alert to the agency owner with the lead\ndetails, and an acknowledgement to the customer. If the owner notification\nfails, the customer still gets their reply.",
         "height": 240,
         "width": 700,
         "color": 2
@@ -563,14 +673,14 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        1300,
+        1960,
         800
       ],
-      "name": "Sticky Note — 7. Human handoff"
+      "name": "Sticky Note — 8. Human handoff"
     },
     {
       "parameters": {
-        "content": "## 8. Outbound & logging\n\nAll four branches converge here.\n\nThe WhatsApp Cloud API node retries 3\ntimes. A delivery failure is recorded\nrather than notified over WhatsApp —\nif the WhatsApp API is down, that\nalert would fail too.",
+        "content": "## 9. Outbound & logging\n\nAll four branches converge here.\n\nThe WhatsApp Cloud API node retries 3\ntimes. A delivery failure is recorded\nrather than notified over WhatsApp —\nif the WhatsApp API is down, that\nalert would fail too.",
         "height": 320,
         "width": 480,
         "color": 7
@@ -578,10 +688,54 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        2000,
+        2660,
         340
       ],
-      "name": "Sticky Note — 8. Outbound & logging"
+      "name": "Sticky Note — 9. Outbound & logging"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "whatsapp_conversations"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "telefono",
+              "condition": "eq",
+              "keyValue": "={{ $('Update Conversation Memory').first().json.telefono }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "telefono": "={{ $('Update Conversation Memory').first().json.telefono }}",
+            "estado": "={{ $('Update Conversation Memory').first().json.estadoFinal }}",
+            "actualizadoEn": "={{ $('Update Conversation Memory').first().json.actualizadoEnIso }}"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "position": [
+        3140,
+        500
+      ],
+      "name": "Save Conversation Memory",
+      "notesInFlow": true,
+      "notes": "Entidades acumuladas"
     }
   ],
   "connections": {
@@ -600,7 +754,7 @@
       "main": [
         [
           {
-            "node": "Build Classification Prompt",
+            "node": "Read Conversation",
             "type": "main",
             "index": 0
           }
@@ -611,7 +765,7 @@
       "main": [
         [
           {
-            "node": "Build LLM Request",
+            "node": "Remember Inbound Message",
             "type": "main",
             "index": 0
           }
@@ -651,7 +805,7 @@
       "main": [
         [
           {
-            "node": "Route by Intent",
+            "node": "Update Conversation Memory",
             "type": "main",
             "index": 0
           }
@@ -662,7 +816,7 @@
       "main": [
         [
           {
-            "node": "Route by Intent",
+            "node": "Update Conversation Memory",
             "type": "main",
             "index": 0
           }
@@ -810,6 +964,50 @@
         [
           {
             "node": "Log Delivery Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Conversation": {
+      "main": [
+        [
+          {
+            "node": "Build Classification Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remember Inbound Message": {
+      "main": [
+        [
+          {
+            "node": "Build LLM Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Conversation Memory": {
+      "main": [
+        [
+          {
+            "node": "Route by Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Delivery Result": {
+      "main": [
+        [
+          {
+            "node": "Save Conversation Memory",
             "type": "main",
             "index": 0
           }

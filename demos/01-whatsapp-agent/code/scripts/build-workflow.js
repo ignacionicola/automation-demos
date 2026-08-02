@@ -33,6 +33,14 @@ const BUNDLES = {
     datos: {},
     modulos: ['phoneNumbers.js'],
   },
+  'Build Classification Prompt': {
+    datos: {},
+    modulos: ['conversationMemory.js'],
+  },
+  'Update Conversation Memory': {
+    datos: {},
+    modulos: ['conversationMemory.js'],
+  },
   'Build LLM Request': {
     datos: {},
     modulos: ['llmProviders.js'],
