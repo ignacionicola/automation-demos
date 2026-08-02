@@ -72,8 +72,10 @@ function esquemaClasificacionGemini() {
         properties: {
           operacion: campoStringOpcional(),
           tipo: campoStringOpcional(),
+          ciudad: campoStringOpcional(),
           barrio: campoStringOpcional(),
           dormitorios: { type: 'INTEGER', nullable: true },
+          banios: { type: 'INTEGER', nullable: true },
           presupuesto: { type: 'NUMBER', nullable: true },
           moneda: campoStringOpcional(),
           fecha_visita: campoStringOpcional(),
@@ -83,8 +85,10 @@ function esquemaClasificacionGemini() {
         propertyOrdering: [
           'operacion',
           'tipo',
+          'ciudad',
           'barrio',
           'dormitorios',
+          'banios',
           'presupuesto',
           'moneda',
           'fecha_visita',

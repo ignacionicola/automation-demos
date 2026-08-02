@@ -44,8 +44,10 @@ const MAX_MENSAJES = 6;
 const ENTIDADES_ACUMULABLES = [
   'operacion',
   'tipo',
+  'ciudad',
   'barrio',
   'dormitorios',
+  'banios',
   'presupuesto',
   'moneda',
   'fecha_visita',

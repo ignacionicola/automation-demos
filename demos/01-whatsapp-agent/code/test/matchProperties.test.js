@@ -2,17 +2,23 @@ const test = require('node:test');
 const assert = require('node:assert');
 
 const { matchProperties, aPesos, USD_TO_ARS } = require('../src/matchProperties');
-const { formatPropertyReply } = require('../src/formatPropertyReply');
+const { formatPropertyReply, describirCriterios } = require('../src/formatPropertyReply');
 const propiedades = require('../src/properties.json');
 
-test('el catálogo de demo tiene 10 propiedades con los campos requeridos', () => {
-  assert.strictEqual(propiedades.length, 10);
+test('el catálogo de demo tiene los campos requeridos y los ids son únicos', () => {
+  assert.ok(propiedades.length >= 10, 'el catálogo quedó más chico de lo esperado');
+
+  const ids = new Set();
   for (const propiedad of propiedades) {
-    for (const campo of ['id', 'titulo', 'operacion', 'tipo', 'barrio', 'dormitorios', 'precio', 'moneda']) {
+    const campos = ['id', 'titulo', 'operacion', 'tipo', 'ciudad', 'barrio', 'dormitorios', 'banios', 'precio', 'moneda'];
+    for (const campo of campos) {
       assert.ok(propiedad[campo] !== undefined, `${propiedad.id} no tiene ${campo}`);
     }
     assert.ok(['venta', 'alquiler'].includes(propiedad.operacion));
     assert.ok(['ARS', 'USD'].includes(propiedad.moneda));
+
+    assert.ok(!ids.has(propiedad.id), `id repetido: ${propiedad.id}`);
+    ids.add(propiedad.id);
   }
 });
 
@@ -150,7 +156,9 @@ test('formatPropertyReply avisa cuando no encontró nada', () => {
 });
 
 test('formatPropertyReply concuerda en singular con un solo resultado', () => {
-  const match = matchProperties({ operacion: 'venta', tipo: 'departamento' }, propiedades);
+  // Un barrio con una sola ficha, para que el caso no dependa del tamaño del
+  // catálogo: al sumar propiedades esto se rompía por motivos ajenos al test.
+  const match = matchProperties({ barrio: 'Urca' }, propiedades);
   assert.strictEqual(match.resultados.length, 1, 'el caso de prueba necesita un único resultado');
 
   const mensaje = formatPropertyReply(match, {});
@@ -164,5 +172,234 @@ test('formatPropertyReply aclara cuando relajó el barrio', () => {
   const match = matchProperties({ operacion: 'venta', tipo: 'casa', barrio: 'Nueva Córdoba' }, propiedades);
   const mensaje = formatPropertyReply(match, {});
 
-  assert.match(mensaje, /barrio no tengo nada/i);
+  assert.match(mensaje, /no encontré/i);
+  assert.match(mensaje, /se acercan/i);
+});
+
+test('al relajar, el mensaje dice con qué criterios buscó', () => {
+  // El caso real que lo motivó: el cliente pregunta por un barrio y la búsqueda
+  // arrastra "2 dormitorios" de un mensaje anterior. Sin nombrarlo, el "no
+  // encontré nada en Alberdi" parece falso, porque en Alberdi sí hay algo.
+  const criterios = { tipo: 'departamento', barrio: 'Alberdi', dormitorios: 2 };
+  const mensaje = formatPropertyReply(matchProperties(criterios, propiedades), { criterios });
+
+  assert.match(mensaje, /departamentos/);
+  assert.match(mensaje, /2 dormitorios/);
+  assert.match(mensaje, /Alberdi/);
+});
+
+test('el mensaje nombra el filtro de baños', () => {
+  const criterios = { tipo: 'departamento', barrio: 'Alberdi', banios: 2 };
+  const mensaje = formatPropertyReply(matchProperties(criterios, propiedades), { criterios });
+
+  assert.match(mensaje, /2 baños/);
+});
+
+test('describirCriterios usa singular y plural donde corresponde', () => {
+  assert.match(describirCriterios({ dormitorios: 1 }), /1 dormitorio\b/);
+  assert.match(describirCriterios({ dormitorios: 2 }), /2 dormitorios/);
+  assert.match(describirCriterios({ banios: 1 }), /1 baño\b/);
+  assert.match(describirCriterios({ banios: 2 }), /2 baños/);
+  assert.match(describirCriterios({ tipo: 'casa' }), /^casas/);
+  assert.match(describirCriterios({ tipo: 'local' }), /^locales/);
+});
+
+test('describirCriterios no dice nada cuando no hay criterios', () => {
+  assert.strictEqual(describirCriterios({}), '');
+  assert.strictEqual(describirCriterios(null), '');
+  // Solo el barrio no cuenta: el barrio se nombra aparte en el encabezado.
+  assert.strictEqual(describirCriterios({ barrio: 'Alberdi' }), '');
+});
+
+test('sin criterios que nombrar, el mensaje sigue siendo natural', () => {
+  const criterios = { barrio: 'Alberdi' };
+  const mensaje = formatPropertyReply(matchProperties(criterios, propiedades), { criterios });
+
+  assert.ok(!mensaje.includes('undefined'));
+  assert.ok(!mensaje.includes('null'));
+  assert.match(mensaje, /Alberdi/);
+});
+
+test('filtra por baños: "con dos baños" descarta las de uno', () => {
+  const { resultados } = matchProperties({ banios: 2 }, propiedades);
+
+  assert.ok(resultados.length > 0);
+  for (const propiedad of resultados) {
+    assert.ok(propiedad.banios >= 2, `${propiedad.id} tiene ${propiedad.banios} baño(s)`);
+  }
+});
+
+test('los baños son un mínimo, no un exacto', () => {
+  // INM-006 tiene 3 baños: quien pide 2 no debe verlo descartado. Se acota por
+  // barrio para no depender del recorte a 3 resultados.
+  const { resultados } = matchProperties({ barrio: 'Cerro de las Rosas', banios: 2 }, propiedades);
+
+  assert.ok(
+    resultados.some((p) => p.id === 'INM-006'),
+    'una propiedad con más baños que los pedidos tiene que seguir entrando',
+  );
+});
+
+test('a igualdad de todo, prioriza el match exacto de baños', () => {
+  const { resultados } = matchProperties({ banios: 2 }, propiedades);
+
+  const exacto = resultados.findIndex((p) => p.banios === 2);
+  const deMas = resultados.findIndex((p) => p.banios > 2);
+  if (exacto !== -1 && deMas !== -1) {
+    assert.ok(exacto < deMas, 'el de 2 baños debe ir antes que el de 3');
+  }
+});
+
+test('combina baños con el resto de los criterios', () => {
+  const { resultados } = matchProperties({ tipo: 'departamento', dormitorios: 2, banios: 2 }, propiedades);
+
+  for (const propiedad of resultados) {
+    assert.strictEqual(propiedad.tipo, 'departamento');
+    assert.ok(propiedad.dormitorios >= 2);
+    assert.ok(propiedad.banios >= 2);
+  }
+});
+
+test('sin criterio de baños, no se filtra por baños', () => {
+  const conFiltro = matchProperties({ banios: 3 }, propiedades).total;
+  const sinFiltro = matchProperties({}, propiedades).total;
+
+  assert.ok(sinFiltro > conFiltro, 'el filtro de baños tiene que achicar el resultado');
+});
+
+test('capitaliza el barrio en el mensaje aunque el cliente lo escriba en minúscula', () => {
+  const criterios = { tipo: 'departamento', barrio: 'alberdi', dormitorios: 2 };
+  const mensaje = formatPropertyReply(matchProperties(criterios, propiedades), { criterios });
+
+  assert.match(mensaje, /en Alberdi/);
+  assert.ok(!/en alberdi/.test(mensaje));
+});
+
+test('todas las propiedades del catálogo declaran ciudad', () => {
+  for (const propiedad of propiedades) {
+    assert.ok(propiedad.ciudad, `${propiedad.id} no tiene ciudad`);
+  }
+});
+
+test('filtra por ciudad', () => {
+  const { resultados } = matchProperties({ ciudad: 'Córdoba' }, propiedades);
+
+  assert.ok(resultados.length > 0);
+  for (const propiedad of resultados) {
+    assert.strictEqual(propiedad.ciudad, 'Córdoba');
+  }
+});
+
+test('la ciudad NO se relaja: antes decir que no hay, que mandar a otra ciudad', () => {
+  // Una ciudad que no está en el catálogo no debe devolver propiedades de otra,
+  // por más que el resto de los criterios encajen.
+  const { resultados, nivel } = matchProperties(
+    { ciudad: 'Rosario', tipo: 'departamento', operacion: 'alquiler' },
+    propiedades,
+  );
+
+  assert.strictEqual(nivel, 'sin_resultados');
+  assert.strictEqual(resultados.length, 0);
+});
+
+test('el barrio sí se relaja, pero dentro de la misma ciudad', () => {
+  const { resultados, nivel } = matchProperties(
+    { ciudad: 'Córdoba', barrio: 'Un Barrio Que No Existe', operacion: 'alquiler' },
+    propiedades,
+  );
+
+  assert.strictEqual(nivel, 'sin_barrio');
+  assert.ok(resultados.length > 0);
+  for (const propiedad of resultados) {
+    assert.strictEqual(propiedad.ciudad, 'Córdoba');
+  }
+});
+
+test('la ciudad matchea sin importar tildes ni mayúsculas', () => {
+  const conTilde = matchProperties({ ciudad: 'Córdoba', operacion: 'venta' }, propiedades);
+  const sinTilde = matchProperties({ ciudad: 'cordoba', operacion: 'venta' }, propiedades);
+
+  assert.deepStrictEqual(
+    sinTilde.resultados.map((p) => p.id),
+    conTilde.resultados.map((p) => p.id),
+  );
+});
+
+test('el listado muestra la ciudad junto al barrio', () => {
+  const match = matchProperties({ ciudad: 'Córdoba', barrio: 'Nueva Córdoba' }, propiedades);
+  const mensaje = formatPropertyReply(match, {});
+
+  assert.match(mensaje, /Nueva Córdoba, Córdoba/);
+});
+
+test('cuando no hay nada en esa ciudad, el mensaje la nombra', () => {
+  const criterios = { ciudad: 'Rosario' };
+  const mensaje = formatPropertyReply(matchProperties(criterios, propiedades), { criterios });
+
+  assert.match(mensaje, /en Rosario/);
+  assert.match(mensaje, /otra localidad|asesor/i);
+});
+
+test('el catálogo cubre las dos ciudades', () => {
+  const ciudades = new Set(propiedades.map((p) => p.ciudad));
+
+  assert.ok(ciudades.has('Córdoba'));
+  assert.ok(ciudades.has('Río Tercero'));
+});
+
+test('Alberdi existe en las dos ciudades y la ciudad las separa', () => {
+  // El caso que justifica el campo ciudad: mismo nombre de barrio, dos
+  // localidades a 100 km. Sin filtrar por ciudad se mezclarían.
+  const enAlberdi = propiedades.filter((p) => p.barrio === 'Alberdi');
+  assert.ok(enAlberdi.length >= 2, 'el catálogo necesita Alberdi en ambas ciudades');
+
+  const capital = matchProperties({ ciudad: 'Córdoba', barrio: 'Alberdi' }, propiedades);
+  const interior = matchProperties({ ciudad: 'Río Tercero', barrio: 'Alberdi' }, propiedades);
+
+  for (const p of capital.resultados) assert.strictEqual(p.ciudad, 'Córdoba');
+  for (const p of interior.resultados) assert.strictEqual(p.ciudad, 'Río Tercero');
+  assert.notDeepStrictEqual(
+    capital.resultados.map((p) => p.id),
+    interior.resultados.map((p) => p.id),
+  );
+});
+
+test('sin ciudad, "Alberdi" trae las de ambas localidades', () => {
+  const { resultados } = matchProperties({ barrio: 'Alberdi' }, propiedades);
+  const ciudades = new Set(resultados.map((p) => p.ciudad));
+
+  assert.ok(ciudades.size > 1, 'debe mezclar mientras el cliente no aclare la ciudad');
+});
+
+test('el barrio matchea con o sin el prefijo "Barrio"', () => {
+  const conPrefijo = matchProperties({ ciudad: 'Río Tercero', barrio: 'Barrio Norte' }, propiedades);
+  const sinPrefijo = matchProperties({ ciudad: 'Río Tercero', barrio: 'Norte' }, propiedades);
+
+  assert.strictEqual(conPrefijo.nivel, 'exacto');
+  assert.deepStrictEqual(
+    sinPrefijo.resultados.map((p) => p.id),
+    conPrefijo.resultados.map((p) => p.id),
+  );
+});
+
+test('también al revés: el cliente agrega "Barrio" y la ficha no lo tiene', () => {
+  const { resultados, nivel } = matchProperties({ ciudad: 'Río Tercero', barrio: 'Barrio Las Flores' }, propiedades);
+
+  assert.strictEqual(nivel, 'exacto');
+  assert.strictEqual(resultados[0].barrio, 'Las Flores');
+});
+
+test('el listado muestra la dirección cuando la ficha la tiene', () => {
+  const match = matchProperties({ ciudad: 'Río Tercero', barrio: 'Las Flores' }, propiedades);
+  const mensaje = formatPropertyReply(match, {});
+
+  assert.match(mensaje, /Lorenzo Capandegui 570/);
+});
+
+test('las fichas sin dirección no dejan una línea vacía', () => {
+  const match = matchProperties({ ciudad: 'Córdoba', barrio: 'Nueva Córdoba' }, propiedades);
+  const mensaje = formatPropertyReply(match, {});
+
+  assert.ok(!mensaje.includes('🗺️ \n'));
+  assert.ok(!mensaje.includes('undefined'));
 });

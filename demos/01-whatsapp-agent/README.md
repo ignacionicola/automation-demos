@@ -80,9 +80,9 @@ flowchart TD
   Gemini, Anthropic or Groq. Swapping providers is a config change, not a
   workflow edit.
 - **One LLM call, not two.** The model returns the intent *and* the extracted
-  entities (operation, property type, neighbourhood, bedrooms, budget, date,
-  time) in a single request, because the property search needs those entities
-  anyway.
+  entities (operation, property type, neighbourhood, bedrooms, bathrooms,
+  budget, date, time) in a single request, because the property search needs
+  those entities anyway.
 - **Conversation memory, keyed by phone number.** A real WhatsApp exchange
   splits one request across several messages: *"busco depto en Nueva Córdoba"*
   then *"algo de un dormitorio"*. The second names neither the neighbourhood
@@ -102,9 +102,24 @@ flowchart TD
 - **FAQs don't hit the LLM.** Keyword matching is instant, costs no tokens and
   always returns the same answer — which is what you want for facts like
   commission rates.
-- **The search degrades gracefully.** If nothing matches exactly, it drops the
-  neighbourhood filter first, then widens the budget by 15%, rather than
-  replying "nothing found".
+- **The search degrades gracefully — and says so.** If nothing matches exactly,
+  it drops the neighbourhood filter first, then widens the budget by 15%,
+  rather than replying "nothing found". When it relaxes, the reply names what
+  it actually searched for: *"No encontré departamentos de 2 dormitorios en
+  Alberdi, pero…"*. That matters because entities accumulate across messages —
+  a customer asking *"¿tenés en Alberdi?"* after mentioning two bedrooms is
+  still being filtered on two bedrooms, and a bare "nothing in that
+  neighbourhood" reads as plainly wrong when there *is* something in Alberdi
+  with one bedroom. Naming the filters lets the customer correct them.
+- **City is a filter, not a suggestion.** The catalogue spans two towns —
+  Córdoba capital and Río Tercero, ~100 km apart — so the neighbourhood alone
+  is ambiguous: *Alberdi* is a barrio of both. Every listing carries a `ciudad`,
+  and unlike the neighbourhood it is **never relaxed**: if there is nothing in
+  the town the customer asked about, the agent says so and offers a human,
+  rather than helpfully showing something an hour's drive away. Neighbourhood
+  matching also ignores a leading *"Barrio"*, since the proper name sometimes
+  includes it (*Barrio Norte*) and sometimes doesn't (*Las Flores*), while
+  customers write it either way.
 - **Explicit error handling on both external APIs.** See below.
 
 ### Why a data table, and not workflow static data
@@ -518,7 +533,7 @@ so open the node's error output rather than trusting the summary line.
 ```
 code/
 ├── src/
-│   ├── properties.json         10 mock properties in Córdoba
+│   ├── properties.json         16 mock properties across two cities
 │   ├── faq.json                agency FAQ entries
 │   ├── matchProperties.js      filtering, scoring, progressive relaxation
 │   ├── formatPropertyReply.js  customer-facing property listings
@@ -529,13 +544,13 @@ code/
 │   ├── phoneNumbers.js         recipient formatting for the Cloud API
 │   ├── llmFailureReason.js     turns a failed LLM call into a readable reason
 │   └── conversationMemory.js   per-phone history and entity accumulation
-├── test/                       115 tests, node:test, no dependencies
+├── test/                       140 tests, node:test, no dependencies
 └── scripts/build-workflow.js   injects src/ into the workflow's Code nodes
 ```
 
 ```bash
 cd code
-npm test                  # 115 tests
+npm test                  # 140 tests
 npm run build:workflow    # regenerate workflow.json from src/
 npm run check:workflow    # fail if the committed workflow.json is stale
 ```

@@ -10,6 +10,14 @@ const ETIQUETAS_TIPO = {
   local: 'Local',
 };
 
+// Para nombrar lo que se buscó en plural, sin inventar reglas de pluralización.
+const TIPOS_EN_PLURAL = {
+  departamento: 'departamentos',
+  casa: 'casas',
+  ph: 'PH',
+  local: 'locales',
+};
+
 function formatearMonto(precio, moneda) {
   const numero = new Intl.NumberFormat('es-AR').format(precio);
   return moneda === 'USD' ? `USD ${numero}` : `$${numero}`;
@@ -37,13 +45,67 @@ function formatearCaracteristicas(propiedad) {
   return partes.join(' · ');
 }
 
-function encabezado(nivel, cantidad) {
+/**
+ * Describe en una frase lo que efectivamente se buscó.
+ *
+ * Existe porque la búsqueda arrastra criterios de mensajes anteriores: si el
+ * cliente pregunta "¿tenés en Alberdi?" y venía de pedir 2 dormitorios, el
+ * filtro sigue puesto. Sin decirlo, un "en ese barrio no tengo nada" parece
+ * lisa y llanamente falso cuando sí hay algo en Alberdi (de 1 dormitorio).
+ * Nombrando los criterios, el cliente ve qué se buscó y puede corregirlo.
+ *
+ * @returns {string} '' si no hay ningún criterio que valga la pena nombrar
+ */
+function describirCriterios(criterios) {
+  const filtros = criterios || {};
+  const partes = [];
+
+  if (filtros.operacion === 'venta') partes.push('en venta');
+  else if (filtros.operacion === 'alquiler') partes.push('en alquiler');
+
+  if (typeof filtros.dormitorios === 'number') {
+    partes.unshift(`de ${filtros.dormitorios} ${filtros.dormitorios === 1 ? 'dormitorio' : 'dormitorios'}`);
+  }
+  if (typeof filtros.banios === 'number') {
+    partes.push(`con ${filtros.banios} ${filtros.banios === 1 ? 'baño' : 'baños'}`);
+  }
+
+  const sustantivo = TIPOS_EN_PLURAL[filtros.tipo] || 'propiedades';
+  // Sin ningún filtro, "propiedades" solo no aporta nada.
+  if (partes.length === 0 && !filtros.tipo) return '';
+
+  return [sustantivo, ...partes].join(' ');
+}
+
+/**
+ * El barrio llega tal cual lo escribió el cliente ("alberdi", "nueva cordoba"),
+ * porque así se lo pide el prompt. Para el mensaje se capitaliza cada palabra,
+ * que es como lo escribiría una persona.
+ */
+function capitalizarBarrio(valor) {
+  if (typeof valor !== 'string' || !valor.trim()) return '';
+  return valor
+    .trim()
+    .split(/\s+/)
+    .map((palabra) => palabra.charAt(0).toUpperCase() + palabra.slice(1))
+    .join(' ');
+}
+
+function encabezado(nivel, cantidad, criterios) {
   const unica = cantidad === 1;
   const sujeto = unica ? 'esta opción' : `estas ${cantidad} opciones`;
+  const buscado = describirCriterios(criterios);
+  const barrio = capitalizarBarrio(criterios && criterios.barrio);
+  const ciudad = capitalizarBarrio(criterios && criterios.ciudad);
+  // "en Las Flores, Río Tercero" cuando hay ambos; si no, el que haya.
+  const donde = [barrio, ciudad].filter(Boolean).join(', ');
 
   if (nivel === 'sin_barrio') {
     const acercan = unica ? 'se acerca' : 'se acercan';
-    return `En ese barrio no tengo nada disponible en este momento, pero fijate ${sujeto} que ${acercan} bastante 👇`;
+    // Se nombra lo buscado para que se entienda por qué no hubo match: puede
+    // ser por el barrio, pero también por un filtro que venía de antes.
+    const queBusque = buscado && donde ? `${buscado} en ${donde}` : buscado || `nada en ${donde || 'ese barrio'}`;
+    return `No encontré ${queBusque}, pero fijate ${sujeto} que ${acercan} bastante 👇`;
   }
   if (nivel === 'presupuesto_ampliado') {
     const valen = unica ? 'vale' : 'valen';
@@ -58,13 +120,21 @@ function bloqueDePropiedad(propiedad, indice) {
   const operacion = propiedad.operacion === 'alquiler' ? 'Alquiler' : 'Venta';
   const lineas = [
     `*${indice + 1}. ${propiedad.titulo}*`,
-    `📍 ${propiedad.barrio} · ${tipo} en ${operacion.toLowerCase()}`,
+    // La ciudad se nombra siempre: el catálogo tiene más de una localidad y
+    // "Las Flores" sin ciudad no le dice nada a alguien de otra zona. Peor
+    // todavía con "Alberdi", que es barrio de Córdoba capital *y* de Río
+    // Tercero.
+    `📍 ${propiedad.barrio}${propiedad.ciudad ? `, ${propiedad.ciudad}` : ''} · ${tipo} en ${operacion.toLowerCase()}`,
     `💰 ${formatearPrecio(propiedad)}`,
     `📐 ${formatearCaracteristicas(propiedad)}`,
   ];
 
   if (Array.isArray(propiedad.destacados) && propiedad.destacados.length > 0) {
     lineas.push(`✨ ${propiedad.destacados.join(' · ')}`);
+  }
+  // Opcional: no todas las fichas del catálogo la tienen cargada.
+  if (propiedad.direccion) {
+    lineas.push(`🗺️ ${propiedad.direccion}`);
   }
   lineas.push(`Ref: ${propiedad.id}`);
 
@@ -73,18 +143,28 @@ function bloqueDePropiedad(propiedad, indice) {
 
 /**
  * @param {{resultados: Array, nivel: string, total: number}} match salida de matchProperties
- * @param {{agencia?: string}} contexto
+ * @param {{agencia?: string, criterios?: object}} contexto
  * @returns {string} mensaje listo para enviar por WhatsApp
  */
 function formatPropertyReply(match, contexto) {
   const agencia = (contexto && contexto.agencia) || 'la inmobiliaria';
+  const criterios = contexto && contexto.criterios;
   const resultados = (match && match.resultados) || [];
 
   if (resultados.length === 0) {
+    const ciudad = capitalizarBarrio(criterios && criterios.ciudad);
+    // La ciudad nunca se relaja, así que si no hubo nada y el cliente nombró
+    // una, lo más probable es que sea eso — conviene decirlo en vez de dejarlo
+    // en un "no encontré nada" genérico que suena a que no se buscó bien.
+    const donde = ciudad ? ` en ${ciudad}` : '';
+    const alternativa = ciudad
+      ? '¿Querés que busque en otra localidad, o te paso con un asesor para que te avise si entra algo?'
+      : '¿Querés que lo intentemos con otro barrio o ampliando un poco el presupuesto? Si preferís, le paso tu consulta a un asesor para que te busque algo a medida.';
+
     return [
-      `Uf, no encontré nada que encaje con eso en el catálogo de ${agencia} 😕`,
+      `Uf, no encontré nada que encaje con eso${donde} en el catálogo de ${agencia} 😕`,
       '',
-      '¿Querés que lo intentemos con otro barrio o ampliando un poco el presupuesto? Si preferís, le paso tu consulta a un asesor para que te busque algo a medida.',
+      alternativa,
     ].join('\n');
   }
 
@@ -96,7 +176,7 @@ function formatPropertyReply(match, contexto) {
   const pregunta = resultados.length === 1 ? '¿Te interesa?' : '¿Te interesa alguna?';
 
   return [
-    encabezado(match.nivel, resultados.length),
+    encabezado(match.nivel, resultados.length, contexto && contexto.criterios),
     '',
     bloques,
     '',
@@ -109,4 +189,10 @@ function formatPropertyReply(match, contexto) {
     .trim();
 }
 
-module.exports = { formatPropertyReply, formatearMonto, formatearPrecio, formatearCaracteristicas };
+module.exports = {
+  formatPropertyReply,
+  formatearMonto,
+  formatearPrecio,
+  formatearCaracteristicas,
+  describirCriterios,
+};

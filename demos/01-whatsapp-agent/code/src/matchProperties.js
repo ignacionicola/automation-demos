@@ -32,6 +32,19 @@ function normalizarTexto(valor) {
   return valor.normalize('NFD').replace(DIACRITICOS, '').toLowerCase().trim();
 }
 
+/**
+ * Compara barrios ignorando el "Barrio" de adelante.
+ *
+ * Hace falta porque el nombre propio a veces lo incluye ("Barrio Norte" en Río
+ * Tercero) y a veces no ("Las Flores"), mientras que el cliente escribe
+ * cualquiera de las dos formas. Sin esto, "tenés en barrio norte" no matchea
+ * con "Barrio Norte", y "en Las Flores" no matchea si el modelo devuelve
+ * "Barrio Las Flores".
+ */
+function normalizarBarrio(valor) {
+  return normalizarTexto(valor).replace(/^barrio\s+/, '');
+}
+
 function aPesos(precio, moneda) {
   return moneda === 'USD' ? precio * USD_TO_ARS : precio;
 }
@@ -50,10 +63,21 @@ function cumpleFiltros(propiedad, criterios, nivel) {
   if (criterios.tipo && normalizarTexto(propiedad.tipo) !== normalizarTexto(criterios.tipo)) {
     return false;
   }
-  if (!nivel.ignorarBarrio && criterios.barrio && normalizarTexto(propiedad.barrio) !== normalizarTexto(criterios.barrio)) {
+  // La ciudad no se relaja en ningún nivel, a diferencia del barrio: quien
+  // pregunta por Río Tercero no quiere ver algo en Córdoba capital, a 100 km.
+  // Si no hay nada en su ciudad, es preferible decirlo y ofrecer un asesor.
+  if (criterios.ciudad && normalizarTexto(propiedad.ciudad) !== normalizarTexto(criterios.ciudad)) {
     return false;
   }
+  if (!nivel.ignorarBarrio && criterios.barrio && normalizarBarrio(propiedad.barrio) !== normalizarBarrio(criterios.barrio)) {
+    return false;
+  }
+  // Dormitorios y baños se interpretan como mínimos: quien pide 2 dormitorios
+  // acepta uno de 3, pero no uno de 1.
   if (typeof criterios.dormitorios === 'number' && propiedad.dormitorios < criterios.dormitorios) {
+    return false;
+  }
+  if (typeof criterios.banios === 'number' && propiedad.banios < criterios.banios) {
     return false;
   }
 
@@ -73,7 +97,7 @@ function cumpleFiltros(propiedad, criterios, nivel) {
 function puntuar(propiedad, criterios) {
   let puntos = 0;
 
-  if (criterios.barrio && normalizarTexto(propiedad.barrio) === normalizarTexto(criterios.barrio)) {
+  if (criterios.barrio && normalizarBarrio(propiedad.barrio) === normalizarBarrio(criterios.barrio)) {
     puntos += 40;
   }
   if (criterios.tipo && normalizarTexto(propiedad.tipo) === normalizarTexto(criterios.tipo)) {
@@ -81,6 +105,9 @@ function puntuar(propiedad, criterios) {
   }
   if (typeof criterios.dormitorios === 'number') {
     puntos += propiedad.dormitorios === criterios.dormitorios ? 20 : 8;
+  }
+  if (typeof criterios.banios === 'number') {
+    puntos += propiedad.banios === criterios.banios ? 10 : 4;
   }
 
   const tope = presupuestoEnPesos(criterios);
@@ -97,7 +124,7 @@ function puntuar(propiedad, criterios) {
 }
 
 /**
- * @param {object} criterios  { operacion, tipo, barrio, dormitorios, presupuesto, moneda }
+ * @param {object} criterios  { operacion, tipo, ciudad, barrio, dormitorios, banios, presupuesto, moneda }
  * @param {Array}  propiedades catálogo completo
  * @returns {{resultados: Array, nivel: string, total: number}}
  */
@@ -121,4 +148,4 @@ function matchProperties(criterios, propiedades) {
   return { resultados: [], nivel: 'sin_resultados', total: 0 };
 }
 
-module.exports = { matchProperties, normalizarTexto, aPesos, USD_TO_ARS, MAX_RESULTADOS };
+module.exports = { matchProperties, normalizarTexto, normalizarBarrio, aPesos, USD_TO_ARS, MAX_RESULTADOS };
