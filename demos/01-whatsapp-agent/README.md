@@ -1,7 +1,7 @@
 # Demo 01 — WhatsApp Agent (Real Estate Agency)
 
 An AI-assisted WhatsApp agent for a real estate agency in Córdoba, Argentina.
-It receives customer messages through the Twilio WhatsApp Sandbox, classifies
+It receives customer messages through the Meta WhatsApp Cloud API, classifies
 each one with an LLM, and answers automatically — searching the property
 catalogue, booking viewings, answering FAQs — or hands the conversation over
 to a human when it is not confident.
@@ -28,7 +28,7 @@ human with the full context, instead of guessing.
 
 ```mermaid
 flowchart TD
-    A["Receive WhatsApp Message<br/>(Twilio Webhook)"] --> B[Normalize Inbound Message]
+    A["Receive WhatsApp Message<br/>(WhatsApp Trigger)"] --> B[Normalize Inbound Message]
     B --> C[Build Classification Prompt]
     C --> C2["Build LLM Request<br/>(provider-specific url/headers/body)"]
     C2 --> D["Classify Intent (LLM)"]
@@ -50,10 +50,10 @@ flowchart TD
     G -->|consulta_general| N[Answer FAQ]
 
     G -->|derivar_humano| O[Build Handoff Messages]
-    O --> P["Notify Owner (Twilio)"]
+    O --> P["Notify Owner (WhatsApp)"]
     P --> Q[Format Handoff Reply]
 
-    I --> R["Send WhatsApp Reply (Twilio)"]
+    I --> R["Send WhatsApp Reply (WhatsApp Cloud)"]
     L --> R
     N --> R
     Q --> R
@@ -95,7 +95,7 @@ flowchart TD
 
 | Failure | Behaviour |
 |---|---|
-| LLM API is slow or down | HTTP node retries 3× (2 s apart). If it still fails, the error output routes to `Build Fallback Classification`, which forces `derivar_humano` — the customer always gets an answer and the owner is notified (the alert names which provider failed). |
+| LLM API is slow or down | HTTP node retries 3× (2 s apart). If it still fails, the error output routes to `Build Fallback Classification`, which forces `derivar_humano` — the customer always gets an answer and the owner is notified. The alert names which provider failed and why, in plain language: `llmFailureReason.js` maps the HTTP status to a readable cause instead of pasting n8n's raw error, which otherwise leaks tooling copy (a Gemini quota error arrives as *"Try spacing your requests out using the batching settings under 'Options'"*) into a message read by the agency owner. |
 | LLM returns malformed JSON, an unknown intent, or a safety-blocked empty response | `Parse Classification` catches it (via `extractLlmText`, which returns `null` instead of throwing) and falls back to `derivar_humano`. |
 | Owner notification fails | `Notify Owner` continues on error, so the customer still receives their reply. |
 | Reply delivery fails | `Send WhatsApp Reply` retries 3×; the outcome is recorded by `Log Delivery Result`. No alert is attempted over WhatsApp — if WhatsApp is down, that alert would fail too. |
@@ -106,41 +106,53 @@ flowchart TD
 
 - **n8n** 2.x (built and verified against 2.8.4 / `n8n-nodes-base` 2.8.1)
 - **Node.js** 18+ (developed on 22) — only needed to run the tests and the build script
-- A **Twilio** account with the WhatsApp Sandbox enabled (free)
+- A **Meta for Developers** account with a Business-type app that has the
+  **WhatsApp** product added (free — includes one test phone number)
 - An API key for **one** LLM provider — a free
   [Google AI Studio](https://aistudio.google.com/apikey) key works out of the
   box (default), or an Anthropic/Groq key if you prefer
-- A public URL for your n8n instance so Twilio can reach the webhook
+- A public URL for your n8n instance so Meta can reach the webhook
   (n8n Cloud gives you one; for local development use a tunnel such as
-  `ngrok http 5678`)
+  `ngrok http 5678`) — **set this up before activating the workflow**: the
+  WhatsApp Trigger node registers its own webhook subscription with Meta's
+  Graph API the moment the workflow activates, and that call fails if the
+  URL isn't reachable yet
 
 No npm dependencies — the custom code uses only the Node standard library.
 
 ## Setup
 
-### 1. Twilio WhatsApp Sandbox
+### 1. Meta WhatsApp Cloud API setup
 
-1. In the [Twilio Console](https://console.twilio.com/), go to
-   **Messaging → Try it out → Send a WhatsApp message**.
-2. You'll see a sandbox number (usually `+1 415 523 8886`) and a join code
-   like `join <two-words>`.
-3. From every phone you want to test with — including the agency owner's —
-   send that join code to the sandbox number over WhatsApp. Twilio only
-   delivers messages to numbers that have joined.
-4. Open the **Sandbox settings** tab. In **"When a message comes in"**, paste
-   your n8n production webhook URL and set the method to **POST**:
+1. Go to [Meta for Developers](https://developers.facebook.com/apps) and
+   create an app (type **Business**), or use an existing one.
+2. In the app dashboard, add the **WhatsApp** product.
+3. Under **WhatsApp → API Setup** you get, for free, a **test phone number**
+   plus everything below it — note these down, you'll need them shortly:
+   - **Phone number ID** (an opaque numeric ID, not the phone number itself)
+   - **WhatsApp Business Account ID**
+   - A **temporary access token** (valid ~24h — enough to finish this setup;
+     see the note below for one that doesn't expire)
+4. While the app is in **development mode**, Meta only delivers messages to
+   numbers you've explicitly added as testers. Still on the API Setup page,
+   add every phone you want to test with — including the agency owner's —
+   and verify each one with the code Meta sends it.
+5. Get the app's **App ID** and **App Secret** from **App Settings → Basic**.
+   These are separate from the access token above: n8n's WhatsApp Trigger
+   node uses them to verify the webhook signature and to register itself
+   with Meta's Graph API.
 
-   ```
-   https://<your-n8n-host>/webhook/whatsapp-inmobiliaria
-   ```
+> **Don't configure the webhook by hand in Meta's dashboard.** n8n's
+> WhatsApp Trigger node registers its own webhook subscription via the
+> Graph API the moment you activate the workflow — there's no callback URL
+> to paste in manually. See [Import and run](#5-import-and-run) below. Just
+> make sure your n8n instance already has a public URL before you activate
+> it.
 
-   While testing from the n8n editor, use the *test* URL instead
-   (`/webhook-test/whatsapp-inmobiliaria`) and press **Execute workflow**
-   before each message.
-5. Copy your **Account SID** and **Auth Token** from the Console dashboard.
-
-> The sandbox expires after 72 hours of inactivity — just re-send the join
-> code if messages stop arriving.
+> **Temporary token expired?** Generate a permanent one instead: **Business
+> Settings → Users → System Users** → create a system user → **Generate
+> token**, scoped to `whatsapp_business_messaging` and
+> `whatsapp_business_management` on your app.
 
 ### 2. Choose an LLM provider
 
@@ -149,11 +161,12 @@ and get an API key for it. **Gemini is the default** and is free.
 
 ### 3. n8n credentials
 
-Create these two credentials in n8n (**Settings → Credentials → Add**):
+Create these three credentials in n8n (**Settings → Credentials → Add**):
 
 | Credential type | Name it **exactly** | Fields |
 |---|---|---|
-| **Twilio API** (`twilioApi`) | `Twilio — WhatsApp Sandbox` | Account SID, Auth Token |
+| **WhatsApp OAuth API** (`whatsAppTriggerApi`) | `WhatsApp Cloud — Trigger OAuth` | Client ID = App ID, Client Secret = App Secret |
+| **WhatsApp API** (`whatsAppApi`) | `WhatsApp Cloud — Access Token` | Access Token, Business Account ID |
 | **Header Auth** (`httpHeaderAuth`) | `LLM Provider — API Key` | Name and Value depend on the provider — see the table below |
 
 **Create these before importing the workflow.** `workflow.json` references them
@@ -161,8 +174,9 @@ by name, so n8n links them automatically on import and the workflow is ready to
 run — no going node by node to attach credentials. If a name doesn't match, the
 node imports with an empty credential slot and fails at runtime with
 `Credentials not found`; fix it by renaming the credential to match, or by
-selecting it manually on `Classify Intent (LLM)`, `Notify Owner (Twilio)` and
-`Send WhatsApp Reply (Twilio)`.
+selecting it manually on `Receive WhatsApp Message (WhatsApp Trigger)`,
+`Classify Intent (LLM)`, `Notify Owner (WhatsApp)` and
+`Send WhatsApp Reply (WhatsApp Cloud)`.
 
 > No secrets are stored in this repository — only the credential *names*.
 > Credential IDs are instance-specific and deliberately left `null`; n8n fills
@@ -175,8 +189,8 @@ Copy `.env.example` to `.env` and set the values on your n8n instance:
 
 | Variable | Purpose | Example |
 |---|---|---|
-| `TWILIO_WHATSAPP_FROM` | Sandbox number that sends messages (E.164, no `whatsapp:` prefix) | `+14155238886` |
-| `OWNER_WHATSAPP_NUMBER` | Where handoff alerts go — must have joined the sandbox | `+5493519876543` |
+| `WHATSAPP_PHONE_NUMBER_ID` | Sender's Phone Number ID from API Setup (not the phone number itself) | `123456789012345` |
+| `OWNER_WHATSAPP_NUMBER` | Where handoff alerts go — must be added as a tester number while the app is in development mode. Any format works (`+54 9 …`, `549…`, `54…`): `Normalize Inbound Message` reformats it for the API — see the `131030` entry under [Troubleshooting](#troubleshooting) | `+5493519876543` |
 | `LLM_PROVIDER` | Which LLM to call: `gemini` (default), `anthropic` or `groq` | `gemini` |
 | `LLM_MODEL` | Optional. Empty = provider's default model | `gemini-flash-latest` |
 | `LLM_API_URL` | Optional. Overrides the provider's default endpoint entirely | *(leave empty)* |
@@ -185,7 +199,8 @@ Copy `.env.example` to `.env` and set the values on your n8n instance:
 
 **Required n8n setting:** n8n blocks environment access from inside nodes by
 default. Set `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` on the instance, otherwise
-`$env` resolves to empty and the Twilio nodes have no `from` number.
+`$env` resolves to empty and the WhatsApp Cloud API nodes have no
+`phoneNumberId` to send from.
 
 > `.env` in this folder is a **template for you to copy values from** — n8n
 > does not read `.env` files itself. The variables have to actually reach the
@@ -205,7 +220,14 @@ npx n8n import:workflow --input=workflow.json
 
 Or import `workflow.json` through the UI: **Workflows → Import from File**.
 
-Then activate the workflow and send a WhatsApp message to the sandbox number.
+Then activate the workflow. Activating it is what makes the WhatsApp Trigger
+node register its webhook subscription with Meta's Graph API — if that call
+fails (usually because n8n's public URL isn't reachable yet, or the App
+ID/Secret in the trigger credential are wrong), n8n shows the error right
+there instead of leaving you with a silently-dead webhook.
+
+Once it's active, send a WhatsApp message to the test number from one of the
+phones you added as a tester in [step 1](#1-meta-whatsapp-cloud-api-setup).
 
 ## LLM Provider
 
@@ -381,6 +403,39 @@ una respuesta que no se pudo interpretar"*:
   `textoCrudoSinParsear`, so you don't have to reproduce the failure to see
   what the model actually sent back.
 
+**The flow runs green end to end but no WhatsApp ever arrives.** The two
+outbound nodes are set to `continueRegularOutput`, so a delivery failure keeps
+the execution green by design — `Log Delivery Result` is where the truth is:
+`entregado: false` with the reason in `error`. Note that n8n surfaces the
+provider's real message in the error's **`description`**, not `message`
+(`message` is n8n's own generic "Bad request - please check your parameters"),
+so open the node's error output rather than trusting the summary line.
+
+- **`(#131030) Recipient phone number not in allowed list`** — the error is
+  misleading: it fires both when the number genuinely isn't on the allowed
+  list *and* when it is, but you sent it in a format Meta doesn't match
+  against that list. The second case is what bit us with an Argentine mobile.
+  Meta's webhook hands you the `wa_id` **with** the mobile `9`
+  (`549XXXXXXXXXX`), but `POST /{phone-number-id}/messages` only accepts it
+  **without** the `9` (`54XXXXXXXXXX`) — send back the exact `wa_id` you just
+  received and it gets rejected. `Normalize Inbound Message` handles this via
+  `toWhatsAppRecipient()` (see `code/src/phoneNumbers.js`), which is why the
+  outbound nodes read `telefonoClienteParaEnvio` / `telefonoDuenoParaEnvio`
+  instead of the E.164 `telefonoCliente` used for logging. Confirmed against
+  the live API: sending to `543511234567` delivers, and the status webhook
+  comes back with `recipient_id: "5493511234567"` — Meta normalises it back on
+  its own. If you hit this for a country other than Argentina, add its mobile
+  prefix to `PREFIJO_MOVIL_POR_PAIS`.
+- Before assuming it's a format problem, rule out the plain case: while the
+  app is in development mode the recipient must be added **and verified** (via
+  the code Meta sends over WhatsApp) under **WhatsApp → API Setup**.
+- Worth knowing what is *not* the cause, since Meta's dashboard nudges you
+  there: the **"Add a payment method"** step under *Configuración de
+  producción* is not required to reply to a test number. Replies inside the
+  24-hour customer service window come back as
+  `"pricing":{"billable":false,...,"type":"free_customer_service"}` in the
+  status webhook — no card, no charge.
+
 ## Custom Code
 
 ```
@@ -393,14 +448,16 @@ code/
 │   ├── answerFaq.js            keyword matching over the FAQ set
 │   ├── scheduling.js           visit validation, records and replies
 │   ├── llmProviders.js         per-provider request building + response parsing
-│   └── parseClassification.js  validates the model's output, provider-agnostic
-├── test/                       66 tests, node:test, no dependencies
+│   ├── parseClassification.js  validates the model's output, provider-agnostic
+│   ├── phoneNumbers.js         recipient formatting for the Cloud API
+│   └── llmFailureReason.js     turns a failed LLM call into a readable reason
+├── test/                       96 tests, node:test, no dependencies
 └── scripts/build-workflow.js   injects src/ into the workflow's Code nodes
 ```
 
 ```bash
 cd code
-npm test                  # 66 tests
+npm test                  # 96 tests
 npm run build:workflow    # regenerate workflow.json from src/
 npm run check:workflow    # fail if the committed workflow.json is stale
 ```
