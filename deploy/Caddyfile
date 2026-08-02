@@ -1,0 +1,23 @@
+# Caddy saca y renueva el certificado TLS solo. No hay que tocar nada acá:
+# el dominio y el mail salen del .env vía docker-compose.yml.
+
+{
+	# Let's Encrypt manda a esta dirección los avisos de vencimiento.
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	# n8n escucha en el 5678 dentro de la red de compose; no está expuesto
+	# al exterior, así que todo el tráfico entra por acá.
+	reverse_proxy n8n:5678
+
+	# n8n usa websockets para el editor y para las ejecuciones en vivo.
+	# Caddy los pasa solo, no hace falta configurar nada extra.
+
+	encode gzip
+
+	log {
+		output stdout
+		format console
+	}
+}

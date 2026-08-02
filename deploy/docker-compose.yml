@@ -1,0 +1,124 @@
+# Producción: n8n + Postgres + Caddy (HTTPS automático).
+#
+# Una sola instancia de n8n aloja las cuatro demos del repo. Levantar todo:
+#
+#   cp .env.example .env    # completá los valores
+#   docker compose up -d
+#
+# Ver los logs:      docker compose logs -f n8n
+# Actualizar n8n:    cambiá el tag de la imagen y  docker compose up -d
+# Frenar todo:       docker compose down   (los volúmenes NO se borran)
+
+services:
+  # Base de datos. n8n arranca con SQLite si no se le dice otra cosa, pero
+  # SQLite no aguanta uso real: se corrompe con escrituras concurrentes y no
+  # deja escalar a más de un proceso.
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # n8n espera a que la base esté lista de verdad, no solo a que el
+    # contenedor exista — si arranca antes, falla la migración inicial.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # Sin puertos publicados: solo se accede desde la red interna de compose.
+    networks:
+      - interna
+
+  n8n:
+    image: n8nio/n8n:2.8.4
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # --- Base de datos ---
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+
+      # --- Identidad y URLs ---
+      # Con qué clave se cifran las credenciales guardadas. Si cambia, n8n deja
+      # de poder desencriptar las que ya tenía y hay que recargarlas todas a
+      # mano: fijala una vez y no la pierdas (va también en el backup).
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      N8N_HOST: ${DOMAIN}
+      N8N_PROTOCOL: https
+      # Base de las URLs de webhook que n8n registra en servicios externos
+      # (Meta, Stripe, etc.). Si no coincide con el dominio real, los webhooks
+      # se registran apuntando a una URL que no existe.
+      WEBHOOK_URL: https://${DOMAIN}/
+      # n8n está detrás de Caddy: sin esto ve la IP del proxy en vez de la del
+      # cliente y arma mal las URLs absolutas.
+      N8N_PROXY_HOPS: 1
+
+      # --- Comportamiento ---
+      # Las demos leen su configuración con $env desde los Code nodes, y n8n lo
+      # bloquea por defecto.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: 'false'
+      GENERIC_TIMEZONE: ${TIMEZONE}
+      TZ: ${TIMEZONE}
+      # Borra ejecuciones viejas: sin esto la base crece sin límite.
+      EXECUTIONS_DATA_PRUNE: 'true'
+      EXECUTIONS_DATA_MAX_AGE: 336 # horas (14 días)
+
+      # --- Demo 01: WhatsApp Agent ---
+      # Los secretos (access token de Meta, API key del LLM) NO van acá: se
+      # cargan como credenciales dentro de n8n. Ver el README de la demo.
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID}
+      OWNER_WHATSAPP_NUMBER: ${OWNER_WHATSAPP_NUMBER}
+      AGENCY_NAME: ${AGENCY_NAME}
+      LLM_PROVIDER: ${LLM_PROVIDER}
+      LLM_MODEL: ${LLM_MODEL}
+      LLM_API_URL: ${LLM_API_URL}
+      LLM_THINKING_LEVEL: ${LLM_THINKING_LEVEL}
+    volumes:
+      # Acá viven los binarios de tareas, los archivos subidos y la config
+      # local. Sin este volumen se pierde todo en cada redeploy.
+      - n8n_data:/home/node/.n8n
+    # Tampoco publica puertos al host: entra solo por Caddy.
+    networks:
+      - interna
+
+  # Terminador TLS. Saca y renueva los certificados de Let's Encrypt solo,
+  # con que el dominio apunte a este servidor.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - n8n
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp' # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Los certificados emitidos: sin persistirlos, cada reinicio pide unos
+      # nuevos y Let's Encrypt tiene límite semanal por dominio.
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - interna
+
+volumes:
+  postgres_data:
+  n8n_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  interna:

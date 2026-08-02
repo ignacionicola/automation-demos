@@ -33,6 +33,11 @@ automation-demos/
 ├── README.md              # this file
 ├── LICENSE
 ├── .gitignore
+├── deploy/                # Docker setup to self-host n8n over HTTPS
+│   ├── README.md          # step-by-step deployment guide
+│   ├── docker-compose.yml # n8n + Postgres + Caddy
+│   ├── Caddyfile
+│   └── .env.example
 └── demos/
     └── NN-demo-name/
         ├── README.md       # problem, flow diagram, requirements, how to run
@@ -49,6 +54,18 @@ custom logic has to live inside `workflow.json`. To avoid keeping two copies
 in sync by hand, `code/src/` is the single source of truth and a build script
 injects it into the workflow between markers. Each `workflow.json` is
 committed already built, so importing it needs no build step.
+
+## Where to Run n8n
+
+Any n8n instance works — n8n Cloud, a local install (`npx n8n`), or self-hosted.
+For anything past local experimentation, [`deploy/`](deploy/README.md) has a
+Docker Compose setup (n8n + Postgres + Caddy) that serves every demo from one
+instance over HTTPS on your own domain, with certificates handled automatically.
+
+A stable public URL isn't optional once webhooks are involved: several demos
+register their webhook URL with a third party (Meta, Stripe, …), and those
+services keep calling whatever URL was registered — so a tunnel URL that
+changes between restarts means silently dead triggers.
 
 ## How to Import a Workflow into n8n
 
