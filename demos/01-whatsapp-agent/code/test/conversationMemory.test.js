@@ -8,6 +8,7 @@ const {
   estaVigente,
   conversacionActiva,
   agregarMensaje,
+  reemplazarUltimoMensaje,
   fusionarEntidades,
   formatearContexto,
   TTL_INACTIVIDAD_MS,
@@ -184,4 +185,35 @@ test('fusionarEntidades no pierde el historial', () => {
 
   assert.strictEqual(final.mensajes.length, 1);
   assert.strictEqual(final.entidades.barrio, 'Alberdi');
+});
+
+test('la transcripción reemplaza al marcador de la nota de voz', () => {
+  // Así funciona con audio: primero se guarda un marcador (antes de llamar al
+  // modelo), y cuando vuelve la transcripción se corrige el historial.
+  const conMarcador = agregarMensaje(null, { mensaje: '(nota de voz)' }, AHORA);
+  const corregida = reemplazarUltimoMensaje(conMarcador, 'busco depto en Nueva Córdoba');
+
+  assert.strictEqual(corregida.mensajes.length, 1);
+  assert.strictEqual(corregida.mensajes[0].texto, 'busco depto en Nueva Córdoba');
+});
+
+test('reemplazar solo toca el último mensaje, no el historial previo', () => {
+  let conversacion = agregarMensaje(null, { mensaje: 'hola' }, AHORA);
+  conversacion = agregarMensaje(conversacion, { mensaje: '(nota de voz)' }, AHORA + 1000);
+
+  const corregida = reemplazarUltimoMensaje(conversacion, 'quiero ver el depto');
+
+  assert.deepStrictEqual(
+    corregida.mensajes.map((m) => m.texto),
+    ['hola', 'quiero ver el depto'],
+  );
+});
+
+test('reemplazar no rompe si no hay nada que reemplazar', () => {
+  assert.doesNotThrow(() => reemplazarUltimoMensaje(null, 'algo'));
+  assert.deepStrictEqual(reemplazarUltimoMensaje({ mensajes: [] }, 'algo').mensajes, []);
+
+  // Sin texto nuevo, el historial queda como estaba.
+  const original = agregarMensaje(null, { mensaje: '(nota de voz)' }, AHORA);
+  assert.strictEqual(reemplazarUltimoMensaje(original, '').mensajes[0].texto, '(nota de voz)');
 });

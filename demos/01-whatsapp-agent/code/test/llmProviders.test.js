@@ -211,3 +211,40 @@ test('extractLlmText devuelve null ante respuestas vacías o con forma inesperad
 test('extractLlmText no rompe con un proveedor desconocido', () => {
   assert.doesNotThrow(() => extractLlmText('mistral', { anything: true }));
 });
+
+test('adjunta el audio como inline_data cuando el mensaje fue una nota de voz', () => {
+  const { body } = buildLlmRequest({
+    proveedor: 'gemini',
+    promptSistema: 'sistema',
+    mensajeUsuario: 'vino una nota de voz',
+    audioBase64: 'T2dnUwACAAAAAAAA',
+    audioMime: 'audio/ogg',
+  });
+
+  const partes = body.contents[0].parts;
+  assert.strictEqual(partes.length, 2, 'el texto va primero y el audio después');
+  assert.strictEqual(partes[0].text, 'vino una nota de voz');
+  assert.strictEqual(partes[1].inline_data.mime_type, 'audio/ogg');
+  assert.strictEqual(partes[1].inline_data.data, 'T2dnUwACAAAAAAAA');
+});
+
+test('sin audio, la request queda como siempre', () => {
+  const { body } = buildLlmRequest({ proveedor: 'gemini', mensajeUsuario: 'hola' });
+
+  assert.strictEqual(body.contents[0].parts.length, 1);
+  assert.ok(!body.contents[0].parts.some((p) => p.inline_data));
+});
+
+test('si falta el mime del audio, asume el de las notas de voz de WhatsApp', () => {
+  const { body } = buildLlmRequest({ proveedor: 'gemini', audioBase64: 'AAAA' });
+
+  assert.strictEqual(body.contents[0].parts[1].inline_data.mime_type, 'audio/ogg');
+});
+
+test('el schema le pide la transcripción al modelo, pero no la exige', () => {
+  const { body } = buildLlmRequest({ proveedor: 'gemini' });
+  const schema = body.generationConfig.responseSchema;
+
+  assert.ok('transcripcion' in schema.properties);
+  assert.ok(!schema.required.includes('transcripcion'), 'en los mensajes de texto no aplica');
+});

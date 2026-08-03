@@ -67,6 +67,10 @@ function esquemaClasificacionGemini() {
         enum: ['consulta_propiedad', 'agendar_visita', 'consulta_general', 'derivar_humano'],
       },
       confianza: { type: 'NUMBER' },
+      // Solo se llena cuando el mensaje vino como nota de voz: es lo que dijo
+      // el cliente, en texto. Va en la misma respuesta que el intent para no
+      // pagar dos llamadas (una para transcribir y otra para clasificar).
+      transcripcion: { type: 'STRING', nullable: true },
       entidades: {
         type: 'OBJECT',
         properties: {
@@ -97,8 +101,10 @@ function esquemaClasificacionGemini() {
         ],
       },
     },
+    // "transcripcion" queda fuera de required: en los mensajes de texto no
+    // aplica, y obligarla haría que el modelo invente algo para llenarla.
     required: ['intent', 'confianza', 'entidades'],
-    propertyOrdering: ['intent', 'confianza', 'entidades'],
+    propertyOrdering: ['intent', 'confianza', 'transcripcion', 'entidades'],
   };
 }
 
@@ -115,7 +121,8 @@ function urlPorDefecto(proveedor, modelo) {
  * Arma la request para el proveedor pedido. Devuelve url/headers/body como
  * datos planos: quien llama decide cómo pasárselos al HTTP Request node.
  *
- * @param {object} opciones { proveedor, modelo, apiUrl, promptSistema, mensajeUsuario, nivelThinking }
+ * @param {object} opciones { proveedor, modelo, apiUrl, promptSistema,
+ *        mensajeUsuario, nivelThinking, audioBase64, audioMime }
  * @returns {{ url: string, headers: object, body: object }}
  */
 function buildLlmRequest(opciones) {
@@ -151,12 +158,27 @@ function buildLlmRequest(opciones) {
       generationConfig.thinkingConfig = { thinkingLevel: nivelThinking };
     }
 
+    // El audio va como una parte más del mismo turno, después del texto. Gemini
+    // lo procesa nativamente: transcribe y clasifica en una sola llamada, sin
+    // un servicio de transcripción intermedio.
+    const partes = [{ text: mensajeUsuario }];
+    if (datos.audioBase64) {
+      partes.push({
+        inline_data: {
+          // Ya viene sin los parámetros del mime ("; codecs=opus"): lo limpia
+          // voiceNotes.normalizarMime en el nodo que lee el mensaje entrante.
+          mime_type: datos.audioMime || 'audio/ogg',
+          data: datos.audioBase64,
+        },
+      });
+    }
+
     return {
       url,
       headers: {},
       body: {
         system_instruction: { parts: [{ text: promptSistema }] },
-        contents: [{ role: 'user', parts: [{ text: mensajeUsuario }] }],
+        contents: [{ role: 'user', parts: partes }],
         generationConfig,
       },
     };

@@ -155,3 +155,42 @@ test('es determinístico', () => {
   const b = parseClassification(opciones);
   assert.deepStrictEqual(a, b);
 });
+
+test('devuelve la transcripción cuando el mensaje fue una nota de voz', () => {
+  const resultado = parseClassification({
+    proveedor: 'gemini',
+    respuestaCruda: respuestaGemini({
+      intent: 'consulta_propiedad',
+      confianza: 0.95,
+      transcripcion: 'Che, busco un depto de dos ambientes en Nueva Córdoba',
+      entidades: { barrio: 'Nueva Córdoba', dormitorios: 2 },
+    }),
+  });
+
+  assert.strictEqual(resultado.intent, 'consulta_propiedad');
+  assert.strictEqual(resultado.transcripcion, 'Che, busco un depto de dos ambientes en Nueva Córdoba');
+});
+
+test('en un mensaje de texto la transcripción queda en null', () => {
+  const resultado = parseClassification({
+    proveedor: 'gemini',
+    respuestaCruda: respuestaGemini({ intent: 'consulta_general', confianza: 0.9, entidades: {} }),
+  });
+
+  assert.strictEqual(resultado.transcripcion, null);
+});
+
+test('una transcripción vacía o en blanco cuenta como ausente', () => {
+  for (const valor of ['', '   ', null, 123]) {
+    const resultado = parseClassification({
+      proveedor: 'gemini',
+      respuestaCruda: respuestaGemini({
+        intent: 'consulta_general',
+        confianza: 0.9,
+        transcripcion: valor,
+        entidades: {},
+      }),
+    });
+    assert.strictEqual(resultado.transcripcion, null, `falló con ${JSON.stringify(valor)}`);
+  }
+});

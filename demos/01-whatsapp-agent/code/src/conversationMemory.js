@@ -153,6 +153,26 @@ function agregarMensaje(conversacion, turno, ahora, opciones) {
 }
 
 /**
+ * Cambia el texto del último mensaje del historial.
+ *
+ * Existe por las notas de voz: el mensaje entrante se guarda antes de llamar al
+ * LLM (para que un mensaje simultáneo lo encuentre), pero en ese momento el
+ * audio todavía no está transcripto y se guarda un marcador. Cuando vuelve la
+ * transcripción, se reemplaza — así el historial que ve el modelo en el
+ * próximo turno tiene lo que la persona dijo, no "(nota de voz)".
+ */
+function reemplazarUltimoMensaje(conversacion, texto) {
+  const base = conversacion || CONVERSACION_VACIA;
+  const mensajes = Array.isArray(base.mensajes) ? base.mensajes.slice() : [];
+  const nuevo = String(texto || '').trim();
+
+  if (!nuevo || mensajes.length === 0) return { ...base, mensajes };
+
+  mensajes[mensajes.length - 1] = { ...mensajes[mensajes.length - 1], texto: nuevo };
+  return { ...base, mensajes };
+}
+
+/**
  * Fusiona las entidades que extrajo el clasificador. Se llama después de
  * clasificar, con la conversación ya actualizada por agregarMensaje.
  */
@@ -221,6 +241,7 @@ module.exports = {
   estaVigente,
   conversacionActiva,
   agregarMensaje,
+  reemplazarUltimoMensaje,
   fusionarEntidades,
   formatearContexto,
   TTL_INACTIVIDAD_MS,

@@ -31,11 +31,11 @@ const FIN = '// <<< END GENERATED >>>';
 const BUNDLES = {
   'Normalize Inbound Message': {
     datos: {},
-    modulos: ['phoneNumbers.js'],
+    modulos: ['phoneNumbers.js', 'voiceNotes.js'],
   },
   'Build Classification Prompt': {
     datos: {},
-    modulos: ['conversationMemory.js'],
+    modulos: ['conversationMemory.js', 'voiceNotes.js'],
   },
   'Update Conversation Memory': {
     datos: {},
@@ -43,7 +43,7 @@ const BUNDLES = {
   },
   'Build LLM Request': {
     datos: {},
-    modulos: ['llmProviders.js'],
+    modulos: ['llmProviders.js', 'voiceNotes.js'],
   },
   'Build Fallback Classification': {
     datos: {},

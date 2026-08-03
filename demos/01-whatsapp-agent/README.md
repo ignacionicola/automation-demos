@@ -32,7 +32,10 @@ flowchart TD
     B --> MR[("Read Conversation<br/>(data table)")]
     MR --> C[Build Classification Prompt]
     C --> MW[("Remember Inbound Message<br/>(data table)")]
-    MW --> C2["Build LLM Request<br/>(provider-specific url/headers/body)"]
+    MW --> V{Is Voice Note?}
+    V -->|audio| V1[Get Audio URL] --> V2[Download Audio] --> VM[Audio or Text]
+    V -->|text| VM
+    VM --> C2["Build LLM Request<br/>(provider-specific url/headers/body<br/>+ audio as inline_data)"]
     C2 --> D["Classify Intent (LLM)"]
 
     D -->|ok| E[Parse Classification]
@@ -95,6 +98,17 @@ flowchart TD
   deterministic and testable — a newly supplied value overrides the stored one,
   an absent one leaves it standing. See
   [why it uses a data table](#why-a-data-table-and-not-workflow-static-data).
+- **Voice notes go straight to the model, not to a transcription service.**
+  Half the enquiries a real agency gets are audio, so treating them as
+  "unsupported" hands most of the work back to a human. Meta's webhook carries
+  a **media ID** rather than the file: one call trades it for a short-lived
+  download URL, a second fetches the audio, and the bytes ride along with the
+  classification prompt as `inline_data`. **One Gemini call** then returns the
+  transcript, the intent *and* the entities — no separate speech-to-text
+  service to pay for, wire up, or keep in sync with the classifier. The
+  transcript replaces the placeholder in conversation memory, so a follow-up
+  message sees what was said, and audio and text mix freely in one
+  conversation. Text messages skip both HTTP calls entirely.
 - **The model's output is never trusted.** `Parse Classification` re-parses the
   JSON (tolerating markdown fences), checks the intent against a whitelist and
   enforces a minimum confidence of `0.6`. Anything that fails becomes
@@ -543,14 +557,15 @@ code/
 │   ├── parseClassification.js  validates the model's output, provider-agnostic
 │   ├── phoneNumbers.js         recipient formatting for the Cloud API
 │   ├── llmFailureReason.js     turns a failed LLM call into a readable reason
-│   └── conversationMemory.js   per-phone history and entity accumulation
-├── test/                       140 tests, node:test, no dependencies
+│   ├── conversationMemory.js   per-phone history and entity accumulation
+│   └── voiceNotes.js           voice-note detection and provider capability
+├── test/                       174 tests, node:test, no dependencies
 └── scripts/build-workflow.js   injects src/ into the workflow's Code nodes
 ```
 
 ```bash
 cd code
-npm test                  # 140 tests
+npm test                  # 174 tests
 npm run build:workflow    # regenerate workflow.json from src/
 npm run check:workflow    # fail if the committed workflow.json is stale
 ```
@@ -639,4 +654,11 @@ This is a portfolio demo, so a few things are deliberately simplified:
   window, a date given for one viewing is still on file if the customer then
   asks about a different property. Clearing them per intent would be the next
   refinement.
-- **Text messages only.** Audio and images are routed to a human.
+- **Voice notes need Gemini.** Anthropic takes no audio at all, and Groq
+  transcribes through a separate Whisper endpoint — another request and another
+  piece of configuration. With either of those set as `LLM_PROVIDER` an audio
+  message is handed to a human, and the alert says why. Audio over 12 MB is
+  refused for the same reason (base64 inflates it ~33% inside the request
+  body).
+- **Images and documents are still routed to a human.** Only text and audio
+  are handled.

@@ -64,10 +64,18 @@ function parseClassification(opciones) {
     intent = 'derivar_humano';
   }
 
+  // Lo que el modelo escuchó en la nota de voz. Solo viene cuando el mensaje
+  // era audio; en texto queda en null y el resto del flujo usa el texto original.
+  const transcripcion =
+    parseado && typeof parseado.transcripcion === 'string' && parseado.transcripcion.trim()
+      ? parseado.transcripcion.trim()
+      : null;
+
   return {
     intent,
     confianza,
     entidades: (parseado && parseado.entidades) || {},
+    transcripcion,
     motivoDerivacion,
     textoCrudo,
   };
