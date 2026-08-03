@@ -65,6 +65,8 @@ flowchart TD
     Q --> R
     R --> S[Log Delivery Result]
     S --> MS[("Save Conversation Memory<br/>(data table)")]
+    MS --> PH{Has Photos?}
+    PH -->|consulta_propiedad| PH1[Split Property Photos] --> PH2["Send Property Photos<br/>(one image each)"]
 ```
 
 ### The four intents
@@ -109,6 +111,16 @@ flowchart TD
   transcript replaces the placeholder in conversation memory, so a follow-up
   message sees what was said, and audio and text mix freely in one
   conversation. Text messages skip both HTTP calls entirely.
+- **Property results come with photos, one message each.** A wall of text is
+  not how anyone shops for a home. The reply is split: a short text message
+  saying what was found, then one image per property with its details as the
+  caption — which is how an agency actually sends listings, and reads far
+  better in a chat. Meta fetches each image from a public URL, so the photo is
+  a field on the listing rather than an upload. Properties without a photo
+  aren't dropped: their details fall back into the text message. The photos are
+  sent at the very end of the flow, after the text and after memory is saved,
+  so they arrive in the right order and a failed image can't cost the customer
+  their answer.
 - **The model's output is never trusted.** `Parse Classification` re-parses the
   JSON (tolerating markdown fences), checks the intent against a whitelist and
   enforces a minimum confidence of `0.6`. Anything that fails becomes
@@ -547,7 +559,7 @@ so open the node's error output rather than trusting the summary line.
 ```
 code/
 ├── src/
-│   ├── properties.json         16 mock properties across two cities
+│   ├── properties.json         16 mock properties across two cities, with photos
 │   ├── faq.json                agency FAQ entries
 │   ├── matchProperties.js      filtering, scoring, progressive relaxation
 │   ├── formatPropertyReply.js  customer-facing property listings
@@ -559,13 +571,13 @@ code/
 │   ├── llmFailureReason.js     turns a failed LLM call into a readable reason
 │   ├── conversationMemory.js   per-phone history and entity accumulation
 │   └── voiceNotes.js           voice-note detection and provider capability
-├── test/                       174 tests, node:test, no dependencies
+├── test/                       182 tests, node:test, no dependencies
 └── scripts/build-workflow.js   injects src/ into the workflow's Code nodes
 ```
 
 ```bash
 cd code
-npm test                  # 174 tests
+npm test                  # 182 tests
 npm run build:workflow    # regenerate workflow.json from src/
 npm run check:workflow    # fail if the committed workflow.json is stale
 ```
@@ -639,7 +651,10 @@ no build step. **Edit `code/src/`, never the JS inside the workflow.**
 This is a portfolio demo, so a few things are deliberately simplified:
 
 - **The property catalogue is mock data** in `code/src/properties.json`. In a
-  real deployment this would query the agency's CRM or listing platform.
+  real deployment this would query the agency's CRM or listing platform. The
+  photos are free stock images hot-linked from Unsplash, not pictures of the
+  listings — a real catalogue would serve its own, and would not depend on a
+  third party staying up for messages to render.
 - **The visits "spreadsheet" uses n8n's workflow static data**, which needs no
   setup and persists across production executions — but *not* across manual
   runs from the editor. The disabled `Log Visit to Google Sheets` node shows

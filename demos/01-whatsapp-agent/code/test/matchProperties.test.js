@@ -2,7 +2,12 @@ const test = require('node:test');
 const assert = require('node:assert');
 
 const { matchProperties, aPesos, USD_TO_ARS } = require('../src/matchProperties');
-const { formatPropertyReply, describirCriterios } = require('../src/formatPropertyReply');
+const {
+  formatPropertyReply,
+  buildPhotoReply,
+  describirCriterios,
+  LARGO_MAXIMO_CAPTION,
+} = require('../src/formatPropertyReply');
 const propiedades = require('../src/properties.json');
 
 test('el catálogo de demo tiene los campos requeridos y los ids son únicos', () => {
@@ -402,4 +407,56 @@ test('las fichas sin dirección no dejan una línea vacía', () => {
 
   assert.ok(!mensaje.includes('🗺️ \n'));
   assert.ok(!mensaje.includes('undefined'));
+});
+
+test('buildPhotoReply manda una foto por propiedad y el texto queda de encabezado', () => {
+  const criterios = { ciudad: 'Río Tercero' };
+  const { texto, fotos } = buildPhotoReply(matchProperties(criterios, propiedades), { criterios });
+
+  assert.strictEqual(fotos.length, 3, 'una foto por resultado');
+  for (const foto of fotos) {
+    assert.match(foto.link, /^https:\/\//, 'Meta necesita una URL pública');
+    assert.match(foto.caption, /Ref: INM-/, 'la ficha va en el pie de foto');
+  }
+
+  // El texto no repite las fichas: para eso están los pies de foto.
+  assert.ok(!texto.includes('Ref: INM-'), 'las fichas no van duplicadas en el texto');
+  assert.match(texto, /¿Te interesa alguna\?/);
+});
+
+test('buildPhotoReply no pierde las propiedades que no tienen foto', () => {
+  const sinFoto = propiedades.map((p) => (p.id === 'INM-101' ? { ...p, foto: undefined } : p));
+  const criterios = { ciudad: 'Río Tercero', barrio: 'Las Flores' };
+  const { texto, fotos } = buildPhotoReply(matchProperties(criterios, sinFoto), { criterios });
+
+  assert.strictEqual(fotos.length, 0);
+  assert.match(texto, /Ref: INM-101/, 'sin foto, la ficha tiene que ir en el texto');
+});
+
+test('buildPhotoReply cae al mensaje de siempre si no encontró nada', () => {
+  const criterios = { ciudad: 'Rosario' };
+  const { texto, fotos } = buildPhotoReply(matchProperties(criterios, propiedades), { criterios });
+
+  assert.strictEqual(fotos.length, 0);
+  assert.match(texto, /no encontré/i);
+});
+
+test('el pie de foto nunca supera el límite de WhatsApp', () => {
+  const largo = propiedades.map((p) => ({
+    ...p,
+    destacados: Array.from({ length: 40 }, (_, i) => `Característica muy larga número ${i}`),
+  }));
+  const { fotos } = buildPhotoReply(matchProperties({ ciudad: 'Córdoba' }, largo), {});
+
+  for (const foto of fotos) {
+    assert.ok(foto.caption.length <= LARGO_MAXIMO_CAPTION, `pie de foto de ${foto.caption.length} caracteres`);
+  }
+});
+
+test('todas las propiedades del catálogo tienen foto', () => {
+  for (const propiedad of propiedades) {
+    assert.match(propiedad.foto || '', /^https:\/\/images\.unsplash\.com\//, `${propiedad.id} sin foto`);
+  }
+  const fotos = propiedades.map((p) => p.foto);
+  assert.strictEqual(new Set(fotos).size, fotos.length, 'no debería haber fotos repetidas');
 });

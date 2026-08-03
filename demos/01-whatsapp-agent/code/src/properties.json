@@ -18,7 +18,8 @@
       "Amoblado",
       "Balcón",
       "Edificio con seguridad 24hs"
-    ]
+    ],
+    "foto": "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=1080&q=80&fm=jpg"
   },
   {
     "id": "INM-002",
@@ -39,7 +40,8 @@
       "Cochera cubierta",
       "Luminoso",
       "Cerca de la UNC"
-    ]
+    ],
+    "foto": "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=1080&q=80&fm=jpg"
   },
   {
     "id": "INM-003",
@@ -60,7 +62,8 @@
       "Sin expensas",
       "Patio propio",
       "Zona gastronómica"
-    ]
+    ],
+    "foto": "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=1080&q=80&fm=jpg"
   },
   {
     "id": "INM-004",
@@ -81,7 +84,8 @@
       "Dos baños",
       "Cochera",
       "Piso alto"
-    ]
+    ],
+    "foto": "https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=1080&q=80&fm=jpg"
   },
   {
     "id": "INM-005",
@@ -102,7 +106,8 @@
       "A estrenar",
       "Cerca del Clínicas",
       "Apto profesional"
-    ]
+    ],
+    "foto": "https://images.unsplash.com/photo-1560185007-cde436f6a4d0?w=1080&q=80&fm=jpg"
   },
   {
     "id": "INM-006",
@@ -123,7 +128,8 @@
       "Pileta",
       "Quincho",
       "Jardín parquizado"
-    ]
+    ],
+    "foto": "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=1080&q=80&fm=jpg"
   },
   {
     "id": "INM-007",
@@ -144,7 +150,8 @@
       "Barrio cerrado",
       "Seguridad 24hs",
       "Espacios verdes"
-    ]
+    ],
+    "foto": "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=1080&q=80&fm=jpg"
   },
   {
     "id": "INM-008",
@@ -165,7 +172,8 @@
       "Parque de 800 m²",
       "Galería con asador",
       "Cochera doble"
-    ]
+    ],
+    "foto": "https://images.unsplash.com/photo-1449844908441-8829872d2607?w=1080&q=80&fm=jpg"
   },
   {
     "id": "INM-009",
@@ -186,7 +194,8 @@
       "Terraza propia",
       "Sin expensas",
       "Buena conexión al centro"
-    ]
+    ],
+    "foto": "https://images.unsplash.com/photo-1484154218962-a197022b5858?w=1080&q=80&fm=jpg"
   },
   {
     "id": "INM-010",
@@ -207,7 +216,8 @@
       "Cochera",
       "SUM y laundry",
       "Apto inversión"
-    ]
+    ],
+    "foto": "https://images.unsplash.com/photo-1502005229762-cf1b2da7c5d6?w=1080&q=80&fm=jpg"
   },
   {
     "id": "INM-101",
@@ -229,7 +239,8 @@
       "Balcón",
       "Cochera",
       "Apto crédito"
-    ]
+    ],
+    "foto": "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=1080&q=80&fm=jpg"
   },
   {
     "id": "INM-102",
@@ -251,7 +262,8 @@
       "Parrilla",
       "Patio grande",
       "Portón eléctrico"
-    ]
+    ],
+    "foto": "https://images.unsplash.com/photo-1416331108676-a22ccb276e35?w=1080&q=80&fm=jpg"
   },
   {
     "id": "INM-103",
@@ -273,7 +285,8 @@
       "A estrenar",
       "Patio propio",
       "Luminoso"
-    ]
+    ],
+    "foto": "https://images.unsplash.com/photo-1567496898669-ee935f5f647a?w=1080&q=80&fm=jpg"
   },
   {
     "id": "INM-104",
@@ -295,7 +308,8 @@
       "A metros de la plaza",
       "Balcón",
       "Edificio con ascensor"
-    ]
+    ],
+    "foto": "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=1080&q=80&fm=jpg"
   },
   {
     "id": "INM-105",
@@ -317,7 +331,8 @@
       "Jardín",
       "Quincho",
       "Cochera doble"
-    ]
+    ],
+    "foto": "https://images.unsplash.com/photo-1583608205776-bfd35f0d9f83?w=1080&q=80&fm=jpg"
   },
   {
     "id": "INM-106",
@@ -339,6 +354,7 @@
       "Placard empotrado",
       "Cochera",
       "Buena orientación"
-    ]
+    ],
+    "foto": "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?w=1080&q=80&fm=jpg"
   }
 ]

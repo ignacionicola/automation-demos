@@ -189,10 +189,82 @@ function formatPropertyReply(match, contexto) {
     .trim();
 }
 
+// Tope del pie de foto de WhatsApp. Una ficha entra cómoda, pero se corta por
+// las dudas: pasarse hace fallar el envío entero, y perder una línea del
+// listado es mejor que perder el mensaje.
+const LARGO_MAXIMO_CAPTION = 1024;
+
+function recortar(texto, maximo) {
+  return texto.length <= maximo ? texto : `${texto.slice(0, maximo - 1)}…`;
+}
+
+/**
+ * Arma la respuesta cuando se van a mandar fotos: un mensaje de texto corto y
+ * una foto por propiedad, con la ficha como pie de foto.
+ *
+ * Por qué separado de formatPropertyReply: con fotos, repetir las fichas en el
+ * texto duplicaría todo. Acá el texto queda como encabezado y cada ficha viaja
+ * en el pie de su propia foto — que es como manda las cosas una inmobiliaria
+ * de verdad, y se ve mucho mejor en el chat.
+ *
+ * Las propiedades que no tengan foto cargada no se pierden: sus fichas se
+ * agregan al mensaje de texto.
+ *
+ * @returns {{texto: string, fotos: Array<{link: string, caption: string}>}}
+ */
+function buildPhotoReply(match, contexto) {
+  const resultados = (match && match.resultados) || [];
+
+  // Sin resultados no hay nada que ilustrar: vale el mensaje de siempre.
+  if (resultados.length === 0) {
+    return { texto: formatPropertyReply(match, contexto), fotos: [] };
+  }
+
+  const conFoto = [];
+  const sinFoto = [];
+  resultados.forEach((propiedad, indice) => {
+    (propiedad.foto ? conFoto : sinFoto).push({ propiedad, indice });
+  });
+
+  // Si ninguna tiene foto, no tiene sentido el formato partido.
+  if (conFoto.length === 0) {
+    return { texto: formatPropertyReply(match, contexto), fotos: [] };
+  }
+
+  const cierre =
+    match.total > resultados.length
+      ? `Tengo ${match.total} propiedades que entran en esa búsqueda, te muestro las ${resultados.length} más afines.`
+      : '';
+  const pregunta = resultados.length === 1 ? '¿Te interesa?' : '¿Te interesa alguna?';
+
+  const texto = [
+    encabezado(match.nivel, resultados.length, contexto && contexto.criterios),
+    '',
+    // Las que no tienen foto van completas acá, para no dejarlas afuera.
+    sinFoto.map(({ propiedad, indice }) => bloqueDePropiedad(propiedad, indice)).join('\n\n'),
+    '',
+    cierre,
+    `${pregunta} Decime la referencia y qué día te queda cómodo, y coordinamos la visita. 🏠`,
+  ]
+    .filter((parte, indice, todas) => !(parte === '' && todas[indice - 1] === ''))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  const fotos = conFoto.map(({ propiedad, indice }) => ({
+    link: propiedad.foto,
+    caption: recortar(bloqueDePropiedad(propiedad, indice), LARGO_MAXIMO_CAPTION),
+  }));
+
+  return { texto, fotos };
+}
+
 module.exports = {
   formatPropertyReply,
+  buildPhotoReply,
   formatearMonto,
   formatearPrecio,
   formatearCaracteristicas,
   describirCriterios,
+  LARGO_MAXIMO_CAPTION,
 };

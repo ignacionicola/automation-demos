@@ -150,3 +150,33 @@ test('no quedaron secretos ni datos personales dentro del workflow', () => {
     assert.ok(!patron.test(texto), `parece haber un secreto embebido (${patron})`);
   }
 });
+
+test('las fotos se mandan después del texto, no antes', () => {
+  // Si salieran antes, el cliente vería las imágenes y recién después el
+  // mensaje que las explica.
+  assert.strictEqual(
+    workflow.connections['Save Conversation Memory'].main[0][0].node,
+    'Has Photos?',
+    'las fotos van al final del flujo',
+  );
+  assert.strictEqual(workflow.connections['Has Photos?'].main[0][0].node, 'Split Property Photos');
+  assert.strictEqual(workflow.connections['Split Property Photos'].main[0][0].node, 'Send Property Photos');
+});
+
+test('solo la rama de propiedades manda fotos', () => {
+  const condicion = nodos.get('Has Photos?').parameters.conditions.conditions[0];
+
+  assert.match(condicion.leftValue, /Update Conversation Memory/, 'se evalúa sobre un nodo que siempre corre');
+  assert.strictEqual(condicion.rightValue, 'consulta_propiedad');
+  assert.deepStrictEqual(workflow.connections['Has Photos?'].main[1], [], 'la rama falsa no manda nada');
+});
+
+test('el nodo de fotos manda imagen por link con pie de foto', () => {
+  const envio = nodos.get('Send Property Photos');
+
+  assert.strictEqual(envio.parameters.messageType, 'image');
+  assert.strictEqual(envio.parameters.mediaPath, 'useMediaLink');
+  assert.match(envio.parameters.mediaLink, /\$json\.link/);
+  assert.match(envio.parameters.additionalFields.mediaCaption, /\$json\.caption/);
+  assert.strictEqual(envio.onError, 'continueRegularOutput', 'una foto rota no debe romper nada');
+});
