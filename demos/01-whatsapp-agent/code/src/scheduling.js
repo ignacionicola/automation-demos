@@ -5,9 +5,18 @@
  * devuelve como `fecha_visita` en formato YYYY-MM-DD y `hora_visita` en HH:MM).
  * Acá se valida que sean reales, futuras y dentro del horario de atención.
  *
+ * También se pide el mail, porque la invitación de Google Calendar viaja por
+ * mail y de WhatsApp solo tenemos el teléfono. Se pide recién cuando la fecha
+ * y la hora ya son válidas: preguntar las tres cosas juntas en el primer
+ * mensaje espanta, y una inmobiliaria real tampoco lo hace.
+ *
  * `ahora` se recibe por parámetro en vez de llamar a new Date() adentro, para
- * que los tests sean determinísticos.
+ * que los tests sean determinísticos. Quien llama le pasa la hora de pared de
+ * Córdoba (ver localTime.js), no la del proceso.
  */
+
+const { esEmailValido, normalizarEmail } = require('./calendarEvent');
+const { aRfc3339 } = require('./localTime');
 
 const HORA_APERTURA = 9;
 const HORA_CIERRE = 19;
@@ -59,7 +68,7 @@ function formatearHoraLegible(cuando) {
 }
 
 /**
- * @param {object} entidades  { fecha_visita, hora_visita, referencia_propiedad }
+ * @param {object} entidades  { fecha_visita, hora_visita, email, referencia_propiedad }
  * @param {{ahora?: Date|string}} opciones
  * @returns {{valido: boolean, motivo: string, cuando: Date|null, faltante: string[]}}
  */
@@ -91,17 +100,45 @@ function parseVisitRequest(entidades, opciones) {
     return { valido: false, motivo: 'fuera_de_horario', cuando, faltante: ['hora'] };
   }
 
+  // El horario cierra recién acá: ya se sabe que el día y la hora sirven, así
+  // que el único dato que falta para mandar la invitación es el mail.
+  if (!esEmailValido(datos.email)) {
+    return { valido: false, motivo: 'falta_email', cuando, faltante: ['email'] };
+  }
+
   return { valido: true, motivo: 'ok', cuando, faltante: [] };
 }
 
-/** Fila que se guarda en la planilla de visitas. */
+/**
+ * Marca la visita como imposible porque la agenda ya tiene ese horario tomado.
+ * No lo decide parseVisitRequest porque depende de la agenda real, que se
+ * consulta después; el resultado tiene la misma forma para que el resto del
+ * flujo no distinga entre "no se puede por horario" y "no se puede por agenda".
+ *
+ * @param {object} validacion   la validación original, ya válida
+ * @param {string[]} alternativas horarios libres, formato "HH:MM"
+ */
+function marcarHorarioOcupado(validacion, alternativas) {
+  return {
+    ...validacion,
+    valido: false,
+    motivo: 'horario_ocupado',
+    faltante: ['hora'],
+    alternativas: Array.isArray(alternativas) ? alternativas : [],
+  };
+}
+
+/** Fila que se guarda en el registro de visitas. */
 function buildVisitRecord(validacion, contacto, entidades) {
   const datos = entidades && typeof entidades === 'object' ? entidades : {};
   return {
     telefono: (contacto && contacto.telefono) || '',
     nombre: (contacto && contacto.nombre) || 'Sin nombre',
+    email: normalizarEmail(datos.email),
     propiedad: datos.referencia_propiedad || 'A definir',
-    fechaIso: validacion.cuando ? validacion.cuando.toISOString() : null,
+    // Con el offset argentino explícito, no en UTC: la fila tiene que decir la
+    // misma hora que el evento de Calendar y que el mensaje al cliente.
+    fechaIso: validacion.cuando ? aRfc3339(validacion.cuando) : null,
     fechaLegible: validacion.cuando ? formatearFechaLegible(validacion.cuando) : null,
     horaLegible: validacion.cuando ? formatearHoraLegible(validacion.cuando) : null,
     estado: 'pendiente_de_confirmacion',
@@ -111,6 +148,7 @@ function buildVisitRecord(validacion, contacto, entidades) {
 /** Mensaje al cliente según el resultado de la validación. */
 function formatSchedulingReply(validacion, registro, contexto) {
   const agencia = (contexto && contexto.agencia) || 'la inmobiliaria';
+  const calendario = (contexto && contexto.calendario) || {};
 
   if (validacion.valido) {
     const propiedad =
@@ -118,13 +156,27 @@ function formatSchedulingReply(validacion, registro, contexto) {
         ? 'la propiedad que elijas'
         : `la propiedad *${registro.propiedad}*`;
 
-    return [
+    const lineas = [
       `¡Listo! Anoté tu visita a ${propiedad} para el *${registro.fechaLegible} a las ${registro.horaLegible} hs* 📅`,
       '',
-      `Un asesor de ${agencia} te confirma por acá dentro de las próximas horas.`,
-      '',
-      'Si necesitás cambiarla o cancelarla, avisame y la reprogramamos sin problema.',
-    ].join('\n');
+    ];
+
+    if (calendario.creado) {
+      // Solo se promete la invitación si Calendar la aceptó de verdad. Si la
+      // llamada falló, la visita igual queda registrada y el mensaje vuelve al
+      // texto de siempre: es preferible que el cliente espere un llamado a que
+      // espere un mail que nunca va a llegar.
+      lineas.push(
+        `Te mandé la invitación a *${registro.email}*: aceptala y te queda en tu calendario con recordatorio.`,
+        '',
+        `Ya está agendada en la agenda de ${agencia}.`,
+      );
+    } else {
+      lineas.push(`Un asesor de ${agencia} te confirma por acá dentro de las próximas horas.`);
+    }
+
+    lineas.push('', 'Si necesitás cambiarla o cancelarla, avisame y la reprogramamos sin problema.');
+    return lineas.join('\n');
   }
 
   if (validacion.motivo === 'datos_incompletos') {
@@ -141,6 +193,35 @@ function formatSchedulingReply(validacion, registro, contexto) {
       `Para agendarla necesito ${pide}`,
       '',
       'Atendemos de *lunes a viernes de 9 a 19 hs* y los *sábados de 9 a 13 hs*.',
+    ].join('\n');
+  }
+
+  if (validacion.motivo === 'falta_email') {
+    return [
+      `Perfecto, te anoto para el *${registro.fechaLegible} a las ${registro.horaLegible} hs* 📅`,
+      '',
+      'Para mandarte la invitación al calendario me falta tu *correo electrónico*. ¿Me lo pasás?',
+    ].join('\n');
+  }
+
+  if (validacion.motivo === 'horario_ocupado') {
+    const alternativas = Array.isArray(validacion.alternativas) ? validacion.alternativas : [];
+
+    if (alternativas.length === 0) {
+      return [
+        `Justo ese horario lo tenemos tomado, y el *${registro.fechaLegible}* nos quedó completo 🕐`,
+        '',
+        '¿Probamos con otro día? Atendemos de *lunes a viernes de 9 a 19 hs* y los *sábados de 9 a 13 hs*.',
+      ].join('\n');
+    }
+
+    return [
+      `Ese horario ya lo tenemos tomado 🕐`,
+      '',
+      `Ese mismo *${registro.fechaLegible}* me queda libre:`,
+      ...alternativas.map((hora) => `• ${hora} hs`),
+      '',
+      '¿Cuál te sirve?',
     ].join('\n');
   }
 
@@ -161,8 +242,10 @@ function formatSchedulingReply(validacion, registro, contexto) {
 
 module.exports = {
   parseVisitRequest,
+  marcarHorarioOcupado,
   buildVisitRecord,
   formatSchedulingReply,
+  cierreDelDia,
   formatearFechaLegible,
   formatearHoraLegible,
   HORA_APERTURA,

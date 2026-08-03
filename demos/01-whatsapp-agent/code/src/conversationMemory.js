@@ -52,6 +52,9 @@ const ENTIDADES_ACUMULABLES = [
   'moneda',
   'fecha_visita',
   'hora_visita',
+  // Se acumula como cualquier otra entidad: el cliente dice el día en un
+  // mensaje y el mail en el siguiente, y recién ahí hay con qué agendar.
+  'email',
   'referencia_propiedad',
 ];
 

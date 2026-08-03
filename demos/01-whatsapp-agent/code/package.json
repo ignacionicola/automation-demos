@@ -5,7 +5,8 @@
   "description": "Lógica custom en Node.js del agente de WhatsApp para inmobiliaria (demo 01). Se inyecta en los Code nodes de workflow.json.",
   "main": "src/matchProperties.js",
   "scripts": {
-    "test": "node --test \"test/*.test.js\"",
+    "test": "node scripts/test.js",
+    "test:once": "node --test \"test/*.test.js\"",
     "build:workflow": "node scripts/build-workflow.js",
     "check:workflow": "node scripts/build-workflow.js --check"
   },

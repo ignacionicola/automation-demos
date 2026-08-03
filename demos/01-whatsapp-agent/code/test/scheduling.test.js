@@ -1,7 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { parseVisitRequest, buildVisitRecord, formatSchedulingReply } = require('../src/scheduling');
+const {
+  parseVisitRequest,
+  marcarHorarioOcupado,
+  buildVisitRecord,
+  formatSchedulingReply,
+} = require('../src/scheduling');
 
 // Referencia fija para que los tests no dependan del día en que corren.
 // 2026-08-03 es un lunes.
@@ -9,8 +14,12 @@ const AHORA = new Date(2026, 7, 3, 10, 0);
 
 const opciones = { ahora: AHORA };
 
+// Una visita completa: miércoles a las 16, con mail. Los tests que prueban un
+// rechazo le sacan justo el dato que están probando.
+const VISITA = { fecha_visita: '2026-08-05', hora_visita: '16:00', email: 'lucia@example.com' };
+
 test('acepta una visita válida en día hábil', () => {
-  const resultado = parseVisitRequest({ fecha_visita: '2026-08-05', hora_visita: '16:00' }, opciones);
+  const resultado = parseVisitRequest(VISITA, opciones);
 
   assert.strictEqual(resultado.valido, true);
   assert.strictEqual(resultado.motivo, 'ok');
@@ -78,27 +87,67 @@ test('rechaza horarios fuera de la atención en día hábil', () => {
 test('el sábado cierra a las 13', () => {
   // 2026-08-08 es sábado.
   assert.strictEqual(
-    parseVisitRequest({ fecha_visita: '2026-08-08', hora_visita: '11:00' }, opciones).valido,
+    parseVisitRequest({ ...VISITA, fecha_visita: '2026-08-08', hora_visita: '11:00' }, opciones).valido,
     true,
   );
   assert.strictEqual(
-    parseVisitRequest({ fecha_visita: '2026-08-08', hora_visita: '15:00' }, opciones).motivo,
+    parseVisitRequest({ ...VISITA, fecha_visita: '2026-08-08', hora_visita: '15:00' }, opciones).motivo,
     'fuera_de_horario',
   );
 });
 
-test('buildVisitRecord arma la fila de la planilla', () => {
-  const validacion = parseVisitRequest({ fecha_visita: '2026-08-05', hora_visita: '16:00' }, opciones);
+test('el mail se pide recién cuando el día y la hora ya sirven', () => {
+  // Pedir las tres cosas de entrada espanta, y además sería pedir el mail para
+  // un horario que después se rechaza.
+  const sinNada = parseVisitRequest({}, opciones);
+  assert.strictEqual(sinNada.motivo, 'datos_incompletos');
+  assert.ok(!sinNada.faltante.includes('email'), 'todavía no corresponde pedirlo');
+
+  const domingo = parseVisitRequest({ fecha_visita: '2026-08-09', hora_visita: '11:00' }, opciones);
+  assert.strictEqual(domingo.motivo, 'domingo_cerrado');
+
+  const soloFaltaMail = parseVisitRequest({ ...VISITA, email: null }, opciones);
+  assert.strictEqual(soloFaltaMail.valido, false);
+  assert.strictEqual(soloFaltaMail.motivo, 'falta_email');
+  assert.deepStrictEqual(soloFaltaMail.faltante, ['email']);
+  // La fecha ya validada sigue disponible: el mensaje la usa para confirmarla.
+  assert.strictEqual(soloFaltaMail.cuando.getHours(), 16);
+});
+
+test('un mail sin forma de mail no alcanza para agendar', () => {
+  for (const email of ['lucia', 'lucia@', '@example.com', 'lucia example.com', 'lucia@example']) {
+    assert.strictEqual(
+      parseVisitRequest({ ...VISITA, email }, opciones).motivo,
+      'falta_email',
+      `"${email}" no debería pasar como mail`,
+    );
+  }
+});
+
+test('buildVisitRecord arma la fila del registro', () => {
+  const validacion = parseVisitRequest(VISITA, opciones);
   const registro = buildVisitRecord(validacion, { telefono: '+5493511234567', nombre: 'Lucía' }, {
+    ...VISITA,
     referencia_propiedad: 'INM-002',
   });
 
   assert.strictEqual(registro.telefono, '+5493511234567');
   assert.strictEqual(registro.nombre, 'Lucía');
+  assert.strictEqual(registro.email, 'lucia@example.com');
   assert.strictEqual(registro.propiedad, 'INM-002');
   assert.strictEqual(registro.horaLegible, '16:00');
   assert.match(registro.fechaLegible, /miércoles 5 de agosto/);
   assert.strictEqual(registro.estado, 'pendiente_de_confirmacion');
+});
+
+test('la fecha guardada lleva el offset argentino, no UTC', () => {
+  // La fila, el evento de Calendar y el mensaje al cliente tienen que decir la
+  // misma hora. En UTC, un toISOString() convertiría las 16:00 en "19:00Z" y
+  // la fila diría una hora que nadie acordó.
+  const validacion = parseVisitRequest(VISITA, opciones);
+  const registro = buildVisitRecord(validacion, null, VISITA);
+
+  assert.strictEqual(registro.fechaIso, '2026-08-05T16:00:00-03:00');
 });
 
 test('buildVisitRecord usa valores por defecto si falta el contacto', () => {
@@ -109,17 +158,72 @@ test('buildVisitRecord usa valores por defecto si falta el contacto', () => {
   assert.strictEqual(registro.propiedad, 'A definir');
 });
 
+/** Una visita válida con su fila, que es lo que recibe formatSchedulingReply. */
+function visitaConfirmada(entidades) {
+  const datos = { ...VISITA, referencia_propiedad: 'INM-002', ...entidades };
+  const validacion = parseVisitRequest(datos, opciones);
+  return { validacion, registro: buildVisitRecord(validacion, { telefono: '+549351', nombre: 'Lucía' }, datos) };
+}
+
 test('confirma la visita en el mensaje al cliente', () => {
-  const validacion = parseVisitRequest({ fecha_visita: '2026-08-05', hora_visita: '16:00' }, opciones);
-  const registro = buildVisitRecord(validacion, { telefono: '+549351', nombre: 'Lucía' }, {
-    referencia_propiedad: 'INM-002',
+  const { validacion, registro } = visitaConfirmada();
+  const mensaje = formatSchedulingReply(validacion, registro, {
+    agencia: 'Inmobiliaria Demo',
+    calendario: { creado: true },
   });
-  const mensaje = formatSchedulingReply(validacion, registro, { agencia: 'Inmobiliaria Demo' });
 
   assert.match(mensaje, /INM-002/);
   assert.match(mensaje, /miércoles 5 de agosto/);
   assert.match(mensaje, /16:00/);
   assert.match(mensaje, /Inmobiliaria Demo/);
+  assert.match(mensaje, /lucia@example\.com/, 'tiene que decir a dónde fue la invitación');
+});
+
+test('sin Calendar no se promete una invitación que no salió', () => {
+  // Si la llamada a Calendar falló, el cliente no puede quedarse esperando un
+  // mail que nunca va a llegar: la visita queda registrada igual y lo confirma
+  // una persona.
+  const { validacion, registro } = visitaConfirmada();
+  const mensaje = formatSchedulingReply(validacion, registro, {
+    agencia: 'Inmobiliaria Demo',
+    calendario: { creado: false, error: 'invalid_grant' },
+  });
+
+  assert.ok(!/invitaci[óo]n/i.test(mensaje), 'no debe prometer la invitación');
+  assert.ok(!/invalid_grant/.test(mensaje), 'el error técnico no le sirve al cliente');
+  assert.match(mensaje, /asesor/i);
+  assert.match(mensaje, /miércoles 5 de agosto/, 'la visita igual quedó anotada');
+});
+
+test('pide el mail nombrando el horario que ya se acordó', () => {
+  const { validacion, registro } = visitaConfirmada({ email: null });
+  const mensaje = formatSchedulingReply(validacion, registro, {});
+
+  assert.match(mensaje, /correo/i);
+  assert.match(mensaje, /miércoles 5 de agosto/, 'confirma lo que ya se habló');
+  assert.match(mensaje, /16:00/);
+});
+
+test('cuando el horario está tomado ofrece los libres más cercanos', () => {
+  const { validacion, registro } = visitaConfirmada();
+  const ocupado = marcarHorarioOcupado(validacion, ['15:00', '17:30']);
+
+  assert.strictEqual(ocupado.valido, false);
+  assert.strictEqual(ocupado.motivo, 'horario_ocupado');
+
+  const mensaje = formatSchedulingReply(ocupado, registro, {});
+  assert.match(mensaje, /tomado/i);
+  assert.match(mensaje, /15:00/);
+  assert.match(mensaje, /17:30/);
+  assert.ok(!/¡Listo!/.test(mensaje), 'no puede sonar a confirmación');
+});
+
+test('si no queda ningún hueco ese día, propone cambiar de día', () => {
+  const { validacion, registro } = visitaConfirmada();
+  const mensaje = formatSchedulingReply(marcarHorarioOcupado(validacion, []), registro, {});
+
+  assert.match(mensaje, /otro d[íi]a/i);
+  assert.match(mensaje, /9 a 19/, 'le recuerda el horario de atención');
 });
 
 test('pide los datos que faltan en el mensaje al cliente', () => {

@@ -84,6 +84,7 @@ function esquemaClasificacionGemini() {
           moneda: campoStringOpcional(),
           fecha_visita: campoStringOpcional(),
           hora_visita: campoStringOpcional(),
+          email: campoStringOpcional(),
           referencia_propiedad: campoStringOpcional(),
         },
         propertyOrdering: [
@@ -97,6 +98,7 @@ function esquemaClasificacionGemini() {
           'moneda',
           'fecha_visita',
           'hora_visita',
+          'email',
           'referencia_propiedad',
         ],
       },

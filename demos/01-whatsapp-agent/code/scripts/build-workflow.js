@@ -35,7 +35,7 @@ const BUNDLES = {
   },
   'Build Classification Prompt': {
     datos: {},
-    modulos: ['conversationMemory.js', 'voiceNotes.js'],
+    modulos: ['localTime.js', 'conversationMemory.js', 'voiceNotes.js'],
   },
   'Update Conversation Memory': {
     datos: {},
@@ -68,13 +68,23 @@ const BUNDLES = {
     datos: { PREGUNTAS_FRECUENTES: 'faq.json' },
     modulos: ['answerFaq.js'],
   },
+  // Los tres nodos de agendado comparten el mismo trío, y en este orden:
+  // scheduling.js usa funciones de calendarEvent.js, que a su vez usa las de
+  // localTime.js. Concatenados en un mismo scope, las dependencias tienen que
+  // quedar declaradas antes.
   'Validate Visit Request': {
+    // El catálogo, para resolver el código de propiedad a una dirección real
+    // que viaje dentro del evento de Calendar.
+    datos: { PROPIEDADES: 'properties.json' },
+    modulos: ['localTime.js', 'calendarEvent.js', 'scheduling.js'],
+  },
+  'Resolve Slot': {
     datos: {},
-    modulos: ['scheduling.js'],
+    modulos: ['localTime.js', 'calendarEvent.js', 'scheduling.js'],
   },
   'Format Scheduling Reply': {
     datos: {},
-    modulos: ['scheduling.js'],
+    modulos: ['localTime.js', 'calendarEvent.js', 'scheduling.js'],
   },
 };
 

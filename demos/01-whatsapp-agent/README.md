@@ -49,9 +49,15 @@ flowchart TD
     H --> I[Format Property Reply]
 
     G -->|agendar_visita| J[Validate Visit Request]
-    J --> K["Append Visit to<br/>Mock Spreadsheet"]
+    J --> CB{Can Book?}
+    CB -->|missing data| L
+    CB -->|date, time, email| CA["Check Calendar Availability<br/>(freeBusy)"]
+    CA --> CR[Resolve Slot]
+    CR --> CF{Slot Free?}
+    CF -->|taken| L
+    CF -->|free| CE["Create Calendar Event<br/>(invites the customer)"]
+    CE --> K[Log Visit Locally]
     K --> L[Format Scheduling Reply]
-    K -.disabled.-> M["Log Visit to<br/>Google Sheets"]
 
     G -->|consulta_general| N[Answer FAQ]
 
@@ -74,7 +80,7 @@ flowchart TD
 | Intent | What triggers it | What the agent does |
 |---|---|---|
 | `consulta_propiedad` | Asking for properties to rent or buy | Filters and scores the catalogue, replies with the top 3 matches |
-| `agendar_visita` | Proposing or requesting a viewing | Validates date/time against business hours, records it, confirms |
+| `agendar_visita` | Proposing or requesting a viewing | Validates date/time against business hours, checks the agency calendar is free, books it and emails the customer the invitation |
 | `consulta_general` | Hours, address, requirements, fees, valuations | Answers from a static FAQ set — no LLM call |
 | `derivar_humano` | Complaints, contractual/legal topics, "I want to talk to someone", or low classifier confidence | Alerts the owner with full lead context, acknowledges to the customer |
 
@@ -121,6 +127,26 @@ flowchart TD
   sent at the very end of the flow, after the text and after memory is saved,
   so they arrive in the right order and a failed image can't cost the customer
   their answer.
+- **Visits are booked in a real Google Calendar, and the customer is invited.**
+  The agent asks for the email once the day and time already check out — not
+  up front, which would be asking for a detail before there is anything to
+  attach it to, and not for a slot that is about to be rejected. The email is
+  accumulated by the same memory that carries the rest of the entities, so it
+  can arrive in its own message. Before booking, the workflow queries
+  **freeBusy** on the agency calendar: if the slot is taken the customer gets
+  the nearest free times of that same day instead of a double booking. The
+  event is created with `sendUpdates: all`, which is what makes Google email
+  the invitation, and it carries the customer's name, phone and the property's
+  real address — so the agent knows who and where without opening the CRM.
+- **Times are anchored to Córdoba, not to the server.** Code nodes inherit the
+  process timezone, which in the Docker deployment is UTC. That was harmless
+  while the agenda was a mock; with a real calendar it books the viewing three
+  hours off, and after 21:00 Argentine time "tomorrow" resolves to the wrong
+  day. `localTime.js` keeps two explicit representations — wall-clock time for
+  calendar arithmetic, real instants for anything compared against Google — and
+  every date sent to Calendar carries the `-03:00` offset. `npm test` runs the
+  whole suite twice, once in the machine's timezone and once in UTC, because
+  this is precisely the class of bug that passes locally and fails on deploy.
 - **The model's output is never trusted.** `Parse Classification` re-parses the
   JSON (tolerating markdown fences), checks the intent against a whitelist and
   enforces a minimum confidence of `0.6`. Anything that fails becomes
@@ -197,6 +223,9 @@ correct, which didn't seem a good trade for a demo.
 | The LLM call failed, so this message has no entities | `Update Conversation Memory` sits after *both* classifier branches, so a fallback still records the message and keeps the entities gathered earlier — one failed call doesn't wipe the customer's context. |
 | The `whatsapp_conversations` table is missing, or a data table node errors | All three data table nodes are set to continue on error with `alwaysOutputData`, so the flow runs without memory rather than leaving the customer unanswered. Memory is an enhancement, not a dependency — this is also what makes the workflow importable and runnable before the table exists. |
 | `LLM_PROVIDER` set to something unsupported | `Build LLM Request` throws immediately with a clear message — this is a deploy-time misconfiguration, not a per-message failure, so it is surfaced as a failed execution rather than silently guessed at. |
+| Google Calendar is unreachable when checking availability | `Resolve Slot` treats the day as free and lets the booking proceed. Refusing to book because the agenda couldn't be *read* is worse for the customer than an occasional overlap, and if Calendar is down the create call will fail next anyway — which is handled on its own line. |
+| Creating the calendar event fails | The visit is still recorded locally and the reply falls back to *"an agent will confirm shortly"*. It never promises an invitation that isn't coming: `Format Scheduling Reply` only mentions the email if Calendar actually returned an event ID. |
+| The customer's slot is already taken | Not an error — `Resolve Slot` marks it `horario_ocupado` and the reply offers the nearest free times of that same day. |
 
 ## Requirements
 
@@ -207,6 +236,10 @@ correct, which didn't seem a good trade for a demo.
 - An API key for **one** LLM provider — a free
   [Google AI Studio](https://aistudio.google.com/apikey) key works out of the
   box (default), or an Anthropic/Groq key if you prefer
+- A **Google account** with the Calendar API enabled and an OAuth client, for
+  booking visits (free) — see [step 3](#3-google-calendar-setup). Without it
+  the agent still answers everything else; only the booking step degrades to
+  *"an agent will confirm"*
 - A public URL for your n8n instance so Meta can reach the webhook
   (n8n Cloud gives you one; for local development use a tunnel such as
   `ngrok http 5678`) — **set this up before activating the workflow**: the
@@ -241,7 +274,7 @@ No npm dependencies — the custom code uses only the Node standard library.
 > **Don't configure the webhook by hand in Meta's dashboard.** n8n's
 > WhatsApp Trigger node registers its own webhook subscription via the
 > Graph API the moment you activate the workflow — there's no callback URL
-> to paste in manually. See [Import and run](#6-import-and-run) below. Just
+> to paste in manually. See [Import and run](#7-import-and-run) below. Just
 > make sure your n8n instance already has a public URL before you activate
 > it.
 
@@ -272,19 +305,48 @@ each message on its own.
 > minutes of inactivity) and overwritten the next time that number writes. For a
 > long-running deployment, prune the table periodically on `actualizadoEn`.
 
-### 3. Choose an LLM provider
+### 3. Google Calendar setup
+
+Visits are booked in a real calendar, and the customer gets the invitation by
+email. That needs an OAuth client — a service account will not do: without
+Google Workspace domain-wide delegation, a service account cannot invite
+attendees, which is the whole point.
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create a
+   project (or reuse one).
+2. **APIs & Services → Library** → enable the **Google Calendar API**.
+3. **APIs & Services → OAuth consent screen** → **External**, fill in the app
+   name and your email. While the app is in *Testing*, add your own Google
+   account under **Test users** — otherwise the consent screen refuses it.
+4. **APIs & Services → Credentials → Create credentials → OAuth client ID** →
+   type **Web application**. Under **Authorized redirect URIs** paste the URL
+   that n8n shows in the credential screen in the next step — for a local
+   instance it is `http://localhost:5678/rest/oauth2-credential/callback`.
+5. Copy the **Client ID** and **Client Secret**.
+
+> **Scope:** n8n's Google Calendar credential requests
+> `https://www.googleapis.com/auth/calendar` — read and write on your
+> calendars. The workflow only reads free/busy and creates events, but the
+> node type asks for the full scope.
+
+> While the OAuth app stays in *Testing*, Google expires the refresh token
+> after 7 days and booking starts failing with `invalid_grant`. Reconnecting
+> the credential fixes it; publishing the app removes the limit.
+
+### 4. Choose an LLM provider
 
 Pick one — see [LLM Provider](#llm-provider) below for the full comparison —
 and get an API key for it. **Gemini is the default** and is free.
 
-### 4. n8n credentials
+### 5. n8n credentials
 
-Create these three credentials in n8n (**Settings → Credentials → Add**):
+Create these four credentials in n8n (**Settings → Credentials → Add**):
 
 | Credential type | Name it **exactly** | Fields |
 |---|---|---|
 | **WhatsApp OAuth API** (`whatsAppTriggerApi`) | `WhatsApp Cloud — Trigger OAuth` | Client ID = App ID, Client Secret = App Secret |
 | **WhatsApp API** (`whatsAppApi`) | `WhatsApp Cloud — Access Token` | Access Token, Business Account ID |
+| **Google Calendar OAuth2 API** (`googleCalendarOAuth2Api`) | `Google Calendar — OAuth2` | Client ID and Client Secret from step 3, then click **Sign in with Google** |
 | **Header Auth** (`httpHeaderAuth`) | `LLM Provider — API Key` | Name and Value depend on the provider — see the table below |
 
 **Create these before importing the workflow.** `workflow.json` references them
@@ -293,15 +355,15 @@ run — no going node by node to attach credentials. If a name doesn't match, th
 node imports with an empty credential slot and fails at runtime with
 `Credentials not found`; fix it by renaming the credential to match, or by
 selecting it manually on `Receive WhatsApp Message (WhatsApp Trigger)`,
-`Classify Intent (LLM)`, `Notify Owner (WhatsApp)` and
-`Send WhatsApp Reply (WhatsApp Cloud)`.
+`Classify Intent (LLM)`, `Notify Owner (WhatsApp)`,
+`Send WhatsApp Reply (WhatsApp Cloud)` and the two `… Calendar …` nodes.
 
 > No secrets are stored in this repository — only the credential *names*.
 > Credential IDs are instance-specific and deliberately left `null`; n8n fills
 > them in on import by matching the name. All non-secret configuration comes
 > from environment variables.
 
-### 5. Environment variables
+### 6. Environment variables
 
 Copy `.env.example` to `.env` and set the values on your n8n instance:
 
@@ -314,6 +376,7 @@ Copy `.env.example` to `.env` and set the values on your n8n instance:
 | `LLM_API_URL` | Optional. Overrides the provider's default endpoint entirely | *(leave empty)* |
 | `LLM_THINKING_LEVEL` | Gemini only. `minimal` (default), `low`, `medium`, `high`, or `off` to omit the field for Gemini 2.5-era models | *(leave empty)* |
 | `AGENCY_NAME` | Agency name used in customer-facing copy | `Inmobiliaria Demo` |
+| `GOOGLE_CALENDAR_ID` | Which calendar receives the visits. Empty or `primary` = the main calendar of the account that authorised the credential | `primary` |
 
 **Required n8n setting:** n8n blocks environment access from inside nodes by
 default. Set `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` on the instance, otherwise
@@ -329,7 +392,7 @@ default. Set `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` on the instance, otherwise
 > provider's default model) — nothing breaks, but double-check this if a
 > value you *did* set doesn't seem to take effect.
 
-### 6. Import and run
+### 7. Import and run
 
 ```bash
 # From this folder
@@ -570,14 +633,19 @@ code/
 │   ├── phoneNumbers.js         recipient formatting for the Cloud API
 │   ├── llmFailureReason.js     turns a failed LLM call into a readable reason
 │   ├── conversationMemory.js   per-phone history and entity accumulation
-│   └── voiceNotes.js           voice-note detection and provider capability
-├── test/                       182 tests, node:test, no dependencies
-└── scripts/build-workflow.js   injects src/ into the workflow's Code nodes
+│   ├── voiceNotes.js           voice-note detection and provider capability
+│   ├── localTime.js            Córdoba wall-clock time, whatever the server runs in
+│   └── calendarEvent.js        Calendar event payload and free-slot search
+├── test/                       223 tests, node:test, no dependencies
+└── scripts/
+    ├── build-workflow.js       injects src/ into the workflow's Code nodes
+    └── test.js                 runs the suite in the local timezone and in UTC
 ```
 
 ```bash
 cd code
-npm test                  # 182 tests
+npm test                  # 223 tests, run twice: local timezone and UTC
+npm run test:once         # a single pass, in the local timezone
 npm run build:workflow    # regenerate workflow.json from src/
 npm run check:workflow    # fail if the committed workflow.json is stale
 ```
@@ -619,9 +687,41 @@ no build step. **Edit `code/src/`, never the JS inside the workflow.**
 
 > **Customer:** Quiero visitar la INM-002 el jueves a las 11
 >
+> **Agent:** Perfecto, te anoto para el **jueves 6 de agosto a las 11:00 hs** 📅
+>
+> Para mandarte la invitación al calendario me falta tu **correo electrónico**. ¿Me lo pasás?
+>
+> **Customer:** lucia.perez@gmail.com
+>
 > **Agent:** ¡Listo! Anoté tu visita a la propiedad **INM-002** para el **jueves 6 de agosto a las 11:00 hs** 📅
 >
-> Un asesor de Inmobiliaria Demo te confirma por acá dentro de las próximas horas.
+> Te mandé la invitación a **lucia.perez@gmail.com**: aceptala y te queda en tu calendario con recordatorio.
+>
+> Ya está agendada en la agenda de Inmobiliaria Demo.
+>
+> Si necesitás cambiarla o cancelarla, avisame y la reprogramamos sin problema.
+
+*And the agency's Google Calendar gets:*
+
+> **Visita — INM-002 · departamento · Nueva Córdoba**
+> Thu 6 Aug, 11:00 – 11:45 · Independencia 850, Nueva Córdoba, Córdoba
+> Guest: lucia.perez@gmail.com
+>
+> Visita coordinada por WhatsApp con Inmobiliaria Demo.
+> Cliente: Lucía · Teléfono: +5493511234567
+
+**When the slot is already taken**
+
+> **Customer:** el jueves a las 11 me viene bien
+>
+> **Agent:** Ese horario ya lo tenemos tomado 🕐
+>
+> Ese mismo **jueves 6 de agosto** me queda libre:
+> • 10:00 hs
+> • 12:00 hs
+> • 12:30 hs
+>
+> ¿Cuál te sirve?
 
 **General question**
 
@@ -655,10 +755,18 @@ This is a portfolio demo, so a few things are deliberately simplified:
   photos are free stock images hot-linked from Unsplash, not pictures of the
   listings — a real catalogue would serve its own, and would not depend on a
   third party staying up for messages to render.
-- **The visits "spreadsheet" uses n8n's workflow static data**, which needs no
-  setup and persists across production executions — but *not* across manual
-  runs from the editor. The disabled `Log Visit to Google Sheets` node shows
-  the production path.
+- **Visits are booked in one shared calendar, with no per-agent routing.** A
+  real agency has several agents; this books everything against a single
+  calendar and treats any busy block on it as unavailable. Routing by agent
+  would mean a freeBusy query per agent and a rule for picking one.
+- **A booked visit can't be cancelled or moved from WhatsApp.** The event ID is
+  recorded, so the update and delete operations are one node each — but
+  recognising *"movelo para el viernes"* as referring to a specific existing
+  booking is a conversational problem, not a Calendar one.
+- **`Log Visit Locally` uses n8n's workflow static data**, which needs no setup
+  and persists across production executions — but *not* across manual runs
+  from the editor. It is a backup record for auditing from inside n8n; the
+  actual agenda is Google Calendar.
 - **The USD→ARS rate is a constant** in `matchProperties.js`. Production would
   read it from an exchange rate API.
 - **Conversation memory rows are never pruned.** An expired conversation is
