@@ -50,12 +50,12 @@ flowchart TD
 
     G -->|agendar_visita| J[Validate Visit Request]
     J --> CB{Can Book?}
-    CB -->|missing data| L
-    CB -->|date, time, email| CA["Check Calendar Availability<br/>(freeBusy)"]
+    CB -->|missing date or property| L
+    CB -->|date, time, property| CA["Check Calendar Availability<br/>(freeBusy)"]
     CA --> CR[Resolve Slot]
     CR --> CF{Slot Free?}
     CF -->|taken| L
-    CF -->|free| CE["Create Calendar Event<br/>(invites the customer)"]
+    CF -->|free| CE["Create Calendar Event<br/>(invites the customer if there's an email)"]
     CE --> K[Log Visit Locally]
     K --> L[Format Scheduling Reply]
 
@@ -80,7 +80,7 @@ flowchart TD
 | Intent | What triggers it | What the agent does |
 |---|---|---|
 | `consulta_propiedad` | Asking for properties to rent or buy | Filters and scores the catalogue, replies with the top 3 matches |
-| `agendar_visita` | Proposing or requesting a viewing | Validates date/time against business hours, checks the agency calendar is free, books it and emails the customer the invitation |
+| `agendar_visita` | Proposing or requesting a viewing | Validates date/time against business hours, asks which property if it isn't known, checks the agency calendar is free, and books it |
 | `consulta_general` | Hours, address, requirements, fees, valuations | Answers from a static FAQ set — no LLM call |
 | `derivar_humano` | Complaints, contractual/legal topics, "I want to talk to someone", or low classifier confidence | Alerts the owner with full lead context, acknowledges to the customer |
 
@@ -127,17 +127,22 @@ flowchart TD
   sent at the very end of the flow, after the text and after memory is saved,
   so they arrive in the right order and a failed image can't cost the customer
   their answer.
-- **Visits are booked in a real Google Calendar, and the customer is invited.**
-  The agent asks for the email once the day and time already check out — not
-  up front, which would be asking for a detail before there is anything to
-  attach it to, and not for a slot that is about to be rejected. The email is
-  accumulated by the same memory that carries the rest of the entities, so it
-  can arrive in its own message. Before booking, the workflow queries
-  **freeBusy** on the agency calendar: if the slot is taken the customer gets
-  the nearest free times of that same day instead of a double booking. The
-  event is created with `sendUpdates: all`, which is what makes Google email
-  the invitation, and it carries the customer's name, phone and the property's
-  real address — so the agent knows who and where without opening the CRM.
+- **Visits are booked in a real Google Calendar.** Before booking, the workflow
+  queries **freeBusy** on the agency calendar: if the slot is taken the
+  customer gets the nearest free times of that same day instead of a double
+  booking. The event carries the customer's name, phone and the property's real
+  address, so the agent knows who and where without opening the CRM.
+- **The agent asks for what the agency needs, and nothing else.** The one thing
+  it insists on beyond the date is *which* property — a booking without it
+  leaves the owner with an appointment and no idea what to show. That question
+  doubles as an offer (*"si todavía no elegiste, decime qué buscás y te muestro
+  las que tengo"*), so a customer who hasn't chosen lands in the property
+  search instead of a dead end, and the date waits in conversation memory
+  meanwhile. The **email is optional**: it is what Google needs to email the
+  invitation, but the customer already has their confirmation in the chat, so
+  asking for it would buy little and blocking the booking without it would be
+  the worst of both worlds. When it does show up, the customer is added as a
+  guest and `sendUpdates: all` makes Google send the invitation.
 - **Times are anchored to Córdoba, not to the server.** Code nodes inherit the
   process timezone, which in the Docker deployment is UTC. That was harmless
   while the agenda was a mock; with a real calendar it books the viewing three
@@ -644,7 +649,7 @@ code/
 │   ├── voiceNotes.js           voice-note detection and provider capability
 │   ├── localTime.js            Córdoba wall-clock time, whatever the server runs in
 │   └── calendarEvent.js        Calendar event payload and free-slot search
-├── test/                       223 tests, node:test, no dependencies
+├── test/                       227 tests, node:test, no dependencies
 └── scripts/
     ├── build-workflow.js       injects src/ into the workflow's Code nodes
     └── test.js                 runs the suite in the local timezone and in UTC
@@ -652,7 +657,7 @@ code/
 
 ```bash
 cd code
-npm test                  # 223 tests, run twice: local timezone and UTC
+npm test                  # 227 tests, run twice: local timezone and UTC
 npm run test:once         # a single pass, in the local timezone
 npm run build:workflow    # regenerate workflow.json from src/
 npm run check:workflow    # fail if the committed workflow.json is stale
@@ -695,19 +700,29 @@ no build step. **Edit `code/src/`, never the JS inside the workflow.**
 
 > **Customer:** Quiero visitar la INM-002 el jueves a las 11
 >
-> **Agent:** Perfecto, te anoto para el **jueves 6 de agosto a las 11:00 hs** 📅
->
-> Para mandarte la invitación al calendario me falta tu **correo electrónico**. ¿Me lo pasás?
->
-> **Customer:** lucia.perez@gmail.com
->
 > **Agent:** ¡Listo! Anoté tu visita a la propiedad **INM-002** para el **jueves 6 de agosto a las 11:00 hs** 📅
 >
-> Te mandé la invitación a **lucia.perez@gmail.com**: aceptala y te queda en tu calendario con recordatorio.
->
-> Ya está agendada en la agenda de Inmobiliaria Demo.
+> Ya quedó agendada en la agenda de Inmobiliaria Demo.
 >
 > Si necesitás cambiarla o cancelarla, avisame y la reprogramamos sin problema.
+
+**When the customer hasn't picked a property yet**
+
+> **Customer:** Buenas, quiero un turno el martes a las 12
+>
+> **Agent:** Perfecto, me anoto el **martes 11 de agosto a las 12:00 hs** 📅
+>
+> ¿Qué propiedad querés visitar? Si tenés el código a mano pasámelo.
+>
+> Y si todavía no elegiste, decime qué estás buscando y te muestro las que tengo. 🏠
+>
+> **Customer:** algo en Río Tercero
+>
+> *(the property search answers, with photos — and the date is still in memory)*
+>
+> **Customer:** la INM-013
+>
+> **Agent:** ¡Listo! Anoté tu visita a la propiedad **INM-013** para el **martes 11 de agosto a las 12:00 hs** 📅
 
 *And the agency's Google Calendar gets:*
 
@@ -770,7 +785,10 @@ This is a portfolio demo, so a few things are deliberately simplified:
 - **A booked visit can't be cancelled or moved from WhatsApp.** The event ID is
   recorded, so the update and delete operations are one node each — but
   recognising *"movelo para el viernes"* as referring to a specific existing
-  booking is a conversational problem, not a Calendar one.
+  booking is a conversational problem, not a Calendar one. In the meantime the
+  availability check absorbs the common case by accident: asking again for a
+  slot you already booked comes back as taken, with alternatives, rather than
+  booking it twice.
 - **`Log Visit Locally` uses n8n's workflow static data**, which needs no setup
   and persists across production executions — but *not* across manual runs
   from the editor. It is a backup record for auditing from inside n8n; the

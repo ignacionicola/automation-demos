@@ -5,17 +5,23 @@
  * devuelve como `fecha_visita` en formato YYYY-MM-DD y `hora_visita` en HH:MM).
  * Acá se valida que sean reales, futuras y dentro del horario de atención.
  *
- * También se pide el mail, porque la invitación de Google Calendar viaja por
- * mail y de WhatsApp solo tenemos el teléfono. Se pide recién cuando la fecha
- * y la hora ya son válidas: preguntar las tres cosas juntas en el primer
- * mensaje espanta, y una inmobiliaria real tampoco lo hace.
+ * Lo que sí se pide, si no vino, es QUÉ propiedad quiere ver: sin eso el dueño
+ * recibe un turno sin saber qué mostrar ni adónde ir. Y como el cliente puede
+ * no haber elegido todavía, la pregunta ofrece mostrarle el catálogo — que es
+ * de lo que vino a hablar.
+ *
+ * El mail, en cambio, es opcional. La invitación de Google viaja por mail y de
+ * WhatsApp solo tenemos el teléfono, pero el cliente ya recibe su confirmación
+ * por el chat: pedírselo agrega un ida y vuelta para darle algo que ya tiene, y
+ * bloquear la reserva por no tenerlo sería lo peor de los dos mundos. Si lo
+ * menciona, se lo invita; si no, se agenda igual.
  *
  * `ahora` se recibe por parámetro en vez de llamar a new Date() adentro, para
  * que los tests sean determinísticos. Quien llama le pasa la hora de pared de
  * Córdoba (ver localTime.js), no la del proceso.
  */
 
-const { esEmailValido, normalizarEmail } = require('./calendarEvent');
+const { normalizarEmail } = require('./calendarEvent');
 const { aRfc3339 } = require('./localTime');
 
 const HORA_APERTURA = 9;
@@ -78,12 +84,16 @@ function parseVisitRequest(entidades, opciones) {
 
   const fecha = parsearFecha(datos.fecha_visita);
   const hora = parsearHora(datos.hora_visita);
+  const sinPropiedad = String(datos.referencia_propiedad || '').trim().length === 0;
 
   const faltante = [];
   if (!fecha) faltante.push('fecha');
   if (!hora) faltante.push('hora');
   if (faltante.length > 0) {
-    return { valido: false, motivo: 'datos_incompletos', cuando: null, faltante };
+    // Si además no sabemos qué quiere ver, se avisa acá mismo en vez de
+    // preguntarlo en el mensaje siguiente: son dos datos que el cliente tiene
+    // igual de a mano, y encadenar preguntas de a una cansa.
+    return { valido: false, motivo: 'datos_incompletos', cuando: null, faltante, sinPropiedad };
   }
 
   const cuando = new Date(fecha.anio, fecha.mes - 1, fecha.dia, hora.horas, hora.minutos);
@@ -100,10 +110,10 @@ function parseVisitRequest(entidades, opciones) {
     return { valido: false, motivo: 'fuera_de_horario', cuando, faltante: ['hora'] };
   }
 
-  // El horario cierra recién acá: ya se sabe que el día y la hora sirven, así
-  // que el único dato que falta para mandar la invitación es el mail.
-  if (!esEmailValido(datos.email)) {
-    return { valido: false, motivo: 'falta_email', cuando, faltante: ['email'] };
+  // Recién acá, con el horario ya validado: no tiene sentido preguntar qué
+  // quiere ver para un turno que se va a rechazar igual.
+  if (sinPropiedad) {
+    return { valido: false, motivo: 'falta_propiedad', cuando, faltante: ['propiedad'] };
   }
 
   return { valido: true, motivo: 'ok', cuando, faltante: [] };
@@ -161,16 +171,20 @@ function formatSchedulingReply(validacion, registro, contexto) {
       '',
     ];
 
-    if (calendario.creado) {
-      // Solo se promete la invitación si Calendar la aceptó de verdad. Si la
-      // llamada falló, la visita igual queda registrada y el mensaje vuelve al
-      // texto de siempre: es preferible que el cliente espere un llamado a que
+    if (calendario.creado && registro.email) {
+      // Solo se promete la invitación si Calendar la aceptó de verdad y hay a
+      // quién mandársela: es preferible que el cliente espere un llamado a que
       // espere un mail que nunca va a llegar.
       lineas.push(
         `Te mandé la invitación a *${registro.email}*: aceptala y te queda en tu calendario con recordatorio.`,
         '',
         `Ya está agendada en la agenda de ${agencia}.`,
       );
+    } else if (calendario.creado) {
+      // Sin mail no se ofrece mandárselo: el cliente contestaría con la
+      // dirección y ese mensaje, con la fecha todavía en memoria, entraría
+      // como un pedido de turno nuevo y agendaría dos veces.
+      lineas.push(`Ya quedó agendada en la agenda de ${agencia}.`);
     } else {
       lineas.push(`Un asesor de ${agencia} te confirma por acá dentro de las próximas horas.`);
     }
@@ -187,20 +201,32 @@ function formatSchedulingReply(validacion, registro, contexto) {
           ? '¿qué día te queda cómodo?'
           : '¿a qué hora te queda cómodo?';
 
-    return [
+    const lineas = [
       `¡Dale, coordinamos la visita! 🏠`,
       '',
-      `Para agendarla necesito ${pide}`,
+      `Para agendarla, ${pide}`,
       '',
       'Atendemos de *lunes a viernes de 9 a 19 hs* y los *sábados de 9 a 13 hs*.',
-    ].join('\n');
+    ];
+
+    if (validacion.sinPropiedad) {
+      lineas.push('', 'Contame también qué propiedad te interesa. Si todavía no elegiste, decime qué estás buscando y te muestro las que tengo.');
+    }
+
+    return lineas.join('\n');
   }
 
-  if (validacion.motivo === 'falta_email') {
+  if (validacion.motivo === 'falta_propiedad') {
+    // La pregunta ofrece las dos salidas: nombrar una propiedad, o pedir que
+    // se las muestre. La segunda cae sola en la búsqueda del catálogo, que ya
+    // contesta con fotos — y la fecha queda guardada en la memoria mientras
+    // tanto, así que el turno no se pierde.
     return [
-      `Perfecto, te anoto para el *${registro.fechaLegible} a las ${registro.horaLegible} hs* 📅`,
+      `Perfecto, me anoto el *${registro.fechaLegible} a las ${registro.horaLegible} hs* 📅`,
       '',
-      'Para mandarte la invitación al calendario me falta tu *correo electrónico*. ¿Me lo pasás?',
+      '¿Qué propiedad querés visitar? Si tenés el código a mano pasámelo.',
+      '',
+      'Y si todavía no elegiste, decime qué estás buscando y te muestro las que tengo. 🏠',
     ].join('\n');
   }
 

@@ -14,9 +14,14 @@ const AHORA = new Date(2026, 7, 3, 10, 0);
 
 const opciones = { ahora: AHORA };
 
-// Una visita completa: miércoles a las 16, con mail. Los tests que prueban un
-// rechazo le sacan justo el dato que están probando.
-const VISITA = { fecha_visita: '2026-08-05', hora_visita: '16:00', email: 'lucia@example.com' };
+// Una visita completa: miércoles a las 16, propiedad elegida y mail. Los tests
+// que prueban un rechazo le sacan justo el dato que están probando.
+const VISITA = {
+  fecha_visita: '2026-08-05',
+  hora_visita: '16:00',
+  referencia_propiedad: 'INM-002',
+  email: 'lucia@example.com',
+};
 
 test('acepta una visita válida en día hábil', () => {
   const resultado = parseVisitRequest(VISITA, opciones);
@@ -96,32 +101,48 @@ test('el sábado cierra a las 13', () => {
   );
 });
 
-test('el mail se pide recién cuando el día y la hora ya sirven', () => {
-  // Pedir las tres cosas de entrada espanta, y además sería pedir el mail para
-  // un horario que después se rechaza.
-  const sinNada = parseVisitRequest({}, opciones);
-  assert.strictEqual(sinNada.motivo, 'datos_incompletos');
-  assert.ok(!sinNada.faltante.includes('email'), 'todavía no corresponde pedirlo');
-
-  const domingo = parseVisitRequest({ fecha_visita: '2026-08-09', hora_visita: '11:00' }, opciones);
-  assert.strictEqual(domingo.motivo, 'domingo_cerrado');
-
-  const soloFaltaMail = parseVisitRequest({ ...VISITA, email: null }, opciones);
-  assert.strictEqual(soloFaltaMail.valido, false);
-  assert.strictEqual(soloFaltaMail.motivo, 'falta_email');
-  assert.deepStrictEqual(soloFaltaMail.faltante, ['email']);
-  // La fecha ya validada sigue disponible: el mensaje la usa para confirmarla.
-  assert.strictEqual(soloFaltaMail.cuando.getHours(), 16);
+test('el mail no hace falta para agendar', () => {
+  // El cliente ya recibe su confirmación por WhatsApp. Pedirle el mail agrega
+  // un ida y vuelta para darle algo que ya tiene, y bloquear la reserva por no
+  // tenerlo sería lo peor de los dos mundos.
+  for (const email of [null, undefined, '', 'no-es-un-mail']) {
+    const resultado = parseVisitRequest({ ...VISITA, email }, opciones);
+    assert.strictEqual(resultado.valido, true, `con email=${JSON.stringify(email)} debería agendar igual`);
+  }
 });
 
-test('un mail sin forma de mail no alcanza para agendar', () => {
-  for (const email of ['lucia', 'lucia@', '@example.com', 'lucia example.com', 'lucia@example']) {
-    assert.strictEqual(
-      parseVisitRequest({ ...VISITA, email }, opciones).motivo,
-      'falta_email',
-      `"${email}" no debería pasar como mail`,
-    );
-  }
+test('se pregunta qué propiedad visitar cuando no se sabe cuál', () => {
+  // Sin esto el dueño recibe un turno sin saber qué mostrar ni adónde ir.
+  const resultado = parseVisitRequest({ ...VISITA, referencia_propiedad: null }, opciones);
+
+  assert.strictEqual(resultado.valido, false);
+  assert.strictEqual(resultado.motivo, 'falta_propiedad');
+  assert.deepStrictEqual(resultado.faltante, ['propiedad']);
+  // La fecha ya validada sigue disponible: el mensaje la confirma mientras pregunta.
+  assert.strictEqual(resultado.cuando.getHours(), 16);
+});
+
+test('la propiedad se pregunta recién cuando el horario ya sirve', () => {
+  // No tiene sentido preguntar qué quiere ver para un turno que se rechaza igual.
+  const domingo = parseVisitRequest(
+    { fecha_visita: '2026-08-09', hora_visita: '11:00', referencia_propiedad: null },
+    opciones,
+  );
+
+  assert.strictEqual(domingo.motivo, 'domingo_cerrado');
+});
+
+test('si no vino ni la fecha ni la propiedad, se piden juntas', () => {
+  // Encadenar preguntas de a una cansa, y son dos datos que el cliente tiene
+  // igual de a mano.
+  const resultado = parseVisitRequest({}, opciones);
+
+  assert.strictEqual(resultado.motivo, 'datos_incompletos');
+  assert.strictEqual(resultado.sinPropiedad, true);
+
+  const mensaje = formatSchedulingReply(resultado, buildVisitRecord(resultado, null, {}), {});
+  assert.match(mensaje, /qué día y a qué hora/i);
+  assert.match(mensaje, /propiedad/i);
 });
 
 test('buildVisitRecord arma la fila del registro', () => {
@@ -195,13 +216,32 @@ test('sin Calendar no se promete una invitación que no salió', () => {
   assert.match(mensaje, /miércoles 5 de agosto/, 'la visita igual quedó anotada');
 });
 
-test('pide el mail nombrando el horario que ya se acordó', () => {
-  const { validacion, registro } = visitaConfirmada({ email: null });
+test('al preguntar qué propiedad, ofrece mostrar el catálogo', () => {
+  // El cliente puede no haber elegido todavía. Una pregunta cerrada lo deja
+  // sin salida; ofrecerle ver las opciones lo lleva a la búsqueda, que es de
+  // lo que vino a hablar.
+  const { validacion, registro } = visitaConfirmada({ referencia_propiedad: null });
   const mensaje = formatSchedulingReply(validacion, registro, {});
 
-  assert.match(mensaje, /correo/i);
-  assert.match(mensaje, /miércoles 5 de agosto/, 'confirma lo que ya se habló');
+  assert.match(mensaje, /qué propiedad/i);
+  assert.match(mensaje, /te muestro/i, 'tiene que ofrecer la otra salida');
+  assert.match(mensaje, /miércoles 5 de agosto/, 'confirma el horario que ya se habló');
   assert.match(mensaje, /16:00/);
+});
+
+test('sin mail confirma igual, sin prometer una invitación', () => {
+  const { validacion, registro } = visitaConfirmada({ email: null });
+  const mensaje = formatSchedulingReply(validacion, registro, {
+    agencia: 'Inmobiliaria Demo',
+    calendario: { creado: true },
+  });
+
+  assert.match(mensaje, /agendada/i);
+  assert.match(mensaje, /miércoles 5 de agosto/);
+  assert.ok(!/invitaci[óo]n/i.test(mensaje), 'no hay a quién mandársela');
+  // Tampoco se lo pide después: el cliente contestaría con la dirección y ese
+  // mensaje, con la fecha todavía en memoria, agendaría una segunda visita.
+  assert.ok(!/mail|correo/i.test(mensaje), 'no puede pedir el mail después de agendar');
 });
 
 test('cuando el horario está tomado ofrece los libres más cercanos', () => {
