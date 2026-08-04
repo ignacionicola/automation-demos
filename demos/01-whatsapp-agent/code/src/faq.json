@@ -26,7 +26,7 @@
       "abierto",
       "sabados"
     ],
-    "respuesta": "Atendemos de *lunes a viernes de 9 a 19 hs* y los *sábados de 9 a 13 hs*. Por WhatsApp me podés escribir cuando quieras, que te respondo apenas puedo."
+    "respuesta": "Atendemos de {{horarios}}. Por WhatsApp me podés escribir cuando quieras, que te respondo apenas puedo."
   },
   {
     "id": "faq-direccion",
@@ -39,7 +39,7 @@
       "quedan",
       "sucursal"
     ],
-    "respuesta": "Estamos en *Av. Colón 1250, Alberdi, Córdoba Capital*. Hay estacionamiento medido sobre la avenida y una playa a media cuadra."
+    "respuesta": "Estamos en *{{direccion}}*. Hay estacionamiento medido sobre la avenida y una playa a media cuadra."
   },
   {
     "id": "faq-requisitos-alquiler",

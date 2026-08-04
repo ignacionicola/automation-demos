@@ -29,7 +29,12 @@ human with the full context, instead of guessing.
 ```mermaid
 flowchart TD
     A["Receive WhatsApp Message<br/>(WhatsApp Trigger)"] --> B[Normalize Inbound Message]
-    B --> MR[("Read Conversation<br/>(data table)")]
+    B --> CFG[Load Config]
+    CFG --> CH{Config Cached?}
+    CH -->|fresh| SCR
+    CH -->|stale| SH1[("Read propiedades")] --> SH2[("Read negocio")] --> SH3[("Read faq")] --> SCB[Build Config]
+    SCB --> SCR[Config Ready]
+    SCR --> MR[("Read Conversation<br/>(data table)")]
     MR --> C[Build Classification Prompt]
     C --> MW[("Remember Inbound Message<br/>(data table)")]
     MW --> V{Is Voice Note?}
@@ -86,6 +91,34 @@ flowchart TD
 
 ### Design decisions worth noting
 
+- **The agency owns its own data, in a spreadsheet.** The catalogue, the
+  business details and the FAQ answers live in the client's Google Sheet —
+  three tabs, editable by someone who has never seen n8n. That is the
+  difference between a demo and something an agency can actually run: without
+  it, adding a listing means editing the workflow. Auth is a **service
+  account**, so onboarding is *share this spreadsheet with an email address* —
+  no consent screen, no Google Cloud project per client, and no refresh token
+  expiring every seven days. The sheet is re-read every 5 minutes rather than
+  on every message; the race between two executions refreshing at once is
+  harmless because this is a cache, not state. If Sheets fails **or a tab comes
+  back empty**, the JSON bundled in the workflow is used instead and the reason
+  is logged — an outdated catalogue beats telling a customer the agency has no
+  properties because of an API blip.
+- **Parsing the spreadsheet is the actual work.** The integration is two node
+  types; what earns its tests is that a human wrote the cells. `420.000`,
+  `$ 420.000` and `USD 52.000` are all prices; `sí`, `x` and `TRUE` all mean
+  yes; `75 m2` is seventy-five, not seven hundred and fifty-two — that one was
+  a real bug, caught by a test, from stripping non-digits instead of taking the
+  first number. Nothing throws: an unreadable cell becomes `null` and the
+  listing takes part in fewer searches, because dropping a real property over a
+  malformed field means the customer never learns it exists.
+- **Opening hours have one home.** They used to live in six places: three
+  constants that validated bookings and four strings that told the customer
+  about them. That was a nuisance; with a spreadsheet in front of it, it would
+  have become a contradiction — the agency writes "9 to 20", the FAQ says so,
+  and the bot keeps rejecting 19:30. The `negocio` tab now drives the
+  validation *and* the copy, and FAQ answers reference `{{horarios}}` instead
+  of spelling the times out, so the two cannot drift apart.
 - **Provider-agnostic LLM step.** `Build LLM Request` reads `LLM_PROVIDER`,
   `LLM_MODEL` and `LLM_API_URL` and builds the right URL, headers and body for
   Gemini, Anthropic or Groq. Swapping providers is a config change, not a
@@ -258,7 +291,7 @@ correct, which didn't seem a good trade for a demo.
   [Google AI Studio](https://aistudio.google.com/apikey) key works out of the
   box (default), or an Anthropic/Groq key if you prefer
 - A **Google account** with the Calendar API enabled and an OAuth client, for
-  booking visits (free) — see [step 3](#3-google-calendar-setup). Without it
+  booking visits (free) — see [step 4](#4-google-calendar-setup). Without it
   the agent still answers everything else; only the booking step degrades to
   *"an agent will confirm"*
 - A public URL for your n8n instance so Meta can reach the webhook
@@ -326,7 +359,43 @@ each message on its own.
 > minutes of inactivity) and overwritten the next time that number writes. For a
 > long-running deployment, prune the table periodically on `actualizadoEn`.
 
-### 3. Google Calendar setup
+### 3. Google Sheets setup
+
+The catalogue, the business details and the FAQ come from a spreadsheet the
+agency owns. **This step is optional** — skip it and the workflow uses the JSON
+bundled inside it, which is what the demo ships with.
+
+1. Build the spreadsheet from [`sheets-template/`](sheets-template/): three
+   CSVs to import as three tabs named `propiedades`, `negocio` and `faq`. They
+   are generated from the demo's own data, so the agent behaves identically
+   before and after connecting it — which is how you tell the connection works.
+2. In [Google Cloud Console](https://console.cloud.google.com/) (the same
+   project as step 4 is fine): **APIs & Services → Library** → enable the
+   **Google Sheets API**.
+3. **IAM & Admin → Service Accounts → Create service account**. Name it
+   something like `n8n-sheets`. No roles needed — access is granted per
+   spreadsheet, not per project.
+4. Open it → **Keys → Add key → Create new key → JSON**. A file downloads.
+5. **Share the spreadsheet with the service account's email address**
+   (`something@your-project.iam.gserviceaccount.com`), exactly as you would
+   share it with a colleague. **Viewer** is enough — the workflow only reads.
+6. Set `SHEETS_DOCUMENT_ID` to the spreadsheet's ID: the long string between
+   `/d/` and `/edit` in its URL.
+
+> **Why a service account and not OAuth:** onboarding a client becomes
+> *"share this sheet with this address"* instead of walking them through a
+> consent screen and a Google Cloud project of their own. It also sidesteps the
+> refresh token that expires every 7 days while an OAuth app is in *Testing* —
+> the limitation the Calendar credential in the next step does have to live
+> with. Calendar can't use a service account, because one cannot invite
+> attendees without Workspace domain-wide delegation.
+
+> **A working example spreadsheet is not linked here on purpose.** Publishing
+> one from this repo would mean sharing a live Google document whose contents
+> nobody is maintaining; the CSVs in `sheets-template/` are the same thing,
+> versioned, and take about a minute to import.
+
+### 4. Google Calendar setup
 
 Visits are booked in a real calendar, and the customer gets the invitation by
 email. That needs an OAuth client — a service account will not do: without
@@ -362,20 +431,21 @@ attendees, which is the whole point.
 > after 7 days and booking starts failing with `invalid_grant`. Reconnecting
 > the credential fixes it; publishing the app removes the limit.
 
-### 4. Choose an LLM provider
+### 5. Choose an LLM provider
 
 Pick one — see [LLM Provider](#llm-provider) below for the full comparison —
 and get an API key for it. **Gemini is the default** and is free.
 
-### 5. n8n credentials
+### 6. n8n credentials
 
-Create these four credentials in n8n (**Settings → Credentials → Add**):
+Create these five credentials in n8n (**Settings → Credentials → Add**):
 
 | Credential type | Name it **exactly** | Fields |
 |---|---|---|
 | **WhatsApp OAuth API** (`whatsAppTriggerApi`) | `WhatsApp Cloud — Trigger OAuth` | Client ID = App ID, Client Secret = App Secret |
 | **WhatsApp API** (`whatsAppApi`) | `WhatsApp Cloud — Access Token` | Access Token, Business Account ID |
-| **Google Calendar OAuth2 API** (`googleCalendarOAuth2Api`) | `Google Calendar — OAuth2` | Client ID and Client Secret from step 3, then click **Sign in with Google** |
+| **Google API** (`googleApi`, service account) | `Google Sheets — Service Account` | Service Account Email and Private Key, both from the JSON downloaded in step 3 |
+| **Google Calendar OAuth2 API** (`googleCalendarOAuth2Api`) | `Google Calendar — OAuth2` | Client ID and Client Secret from step 4, then click **Sign in with Google** |
 | **Header Auth** (`httpHeaderAuth`) | `LLM Provider — API Key` | Name and Value depend on the provider — see the table below |
 
 **Create these before importing the workflow.** `workflow.json` references them
@@ -392,7 +462,7 @@ selecting it manually on `Receive WhatsApp Message (WhatsApp Trigger)`,
 > them in on import by matching the name. All non-secret configuration comes
 > from environment variables.
 
-### 6. Environment variables
+### 7. Environment variables
 
 Copy `.env.example` to `.env` and set the values on your n8n instance:
 
@@ -421,7 +491,7 @@ default. Set `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` on the instance, otherwise
 > provider's default model) — nothing breaks, but double-check this if a
 > value you *did* set doesn't seem to take effect.
 
-### 7. Import and run
+### 8. Import and run
 
 ```bash
 # From this folder
@@ -649,10 +719,11 @@ so open the node's error output rather than trusting the summary line.
 ## Custom Code
 
 ```
+sheets-template/            CSVs for the client's spreadsheet (3 tabs)
 code/
 ├── src/
-│   ├── properties.json         16 mock properties across two cities, with photos
-│   ├── faq.json                agency FAQ entries, including the greeting
+│   ├── properties.json         16 mock properties — the fallback when Sheets is unreachable
+│   ├── faq.json                fallback FAQ entries, including the greeting
 │   ├── matchProperties.js      filtering, scoring, progressive relaxation
 │   ├── formatPropertyReply.js  customer-facing property listings
 │   ├── answerFaq.js            keyword matching over the FAQ set
@@ -664,8 +735,12 @@ code/
 │   ├── conversationMemory.js   per-phone history and entity accumulation
 │   ├── voiceNotes.js           voice-note detection and provider capability
 │   ├── localTime.js            Córdoba wall-clock time, whatever the server runs in
-│   └── calendarEvent.js        Calendar event payload and free-slot search
-├── test/                       227 tests, node:test, no dependencies
+│   ├── calendarEvent.js        Calendar event payload and free-slot search
+│   ├── sheetValues.js          reads what a human typed into a cell
+│   ├── sheetCatalog.js         spreadsheet rows -> catalogue entries
+│   ├── businessConfig.js       the negocio/faq tabs, hours and {{placeholders}}
+│   └── catalogSource.js        cache, and the fallback to the bundled JSON
+├── test/                       281 tests, node:test, no dependencies
 └── scripts/
     ├── build-workflow.js       injects src/ into the workflow's Code nodes
     └── test.js                 runs the suite in the local timezone and in UTC
@@ -673,7 +748,7 @@ code/
 
 ```bash
 cd code
-npm test                  # 227 tests, run twice: local timezone and UTC
+npm test                  # 281 tests, run twice: local timezone and UTC
 npm run test:once         # a single pass, in the local timezone
 npm run build:workflow    # regenerate workflow.json from src/
 npm run check:workflow    # fail if the committed workflow.json is stale

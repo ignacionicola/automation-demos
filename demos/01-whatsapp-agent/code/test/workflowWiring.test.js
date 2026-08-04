@@ -211,6 +211,60 @@ test('la consulta de agenda emite item aunque el día esté libre', () => {
   assert.strictEqual(consulta.parameters.options.outputFormat, 'bookedSlots');
 });
 
+test('la planilla se lee una vez y se reusa un rato', () => {
+  // Sin el caché, cada "hola" cuesta tres llamadas a la API de Sheets para
+  // releer un catálogo que cambia una vez por semana.
+  assert.strictEqual(workflow.connections['Load Config'].main[0][0].node, 'Config Cached?');
+
+  const salidas = workflow.connections['Config Cached?'].main;
+  assert.strictEqual(salidas[0][0].node, 'Config Ready', 'con caché fresco no se lee nada');
+  assert.strictEqual(salidas[1][0].node, 'Read Properties Sheet');
+  assert.strictEqual(salidas[0][0].index, 1, 'entra por la otra pata del merge');
+});
+
+test('las tres pestañas emiten item aunque estén vacías', () => {
+  // Igual que con freeBusy: cero filas serían cero items y la rama moriría en
+  // silencio, en vez de caer al respaldo del repo.
+  for (const nombre of ['Read Properties Sheet', 'Read Business Sheet', 'Read FAQ Sheet']) {
+    const lectura = nodos.get(nombre);
+
+    assert.ok(lectura, `falta el nodo "${nombre}"`);
+    assert.strictEqual(lectura.alwaysOutputData, true, `"${nombre}" tiene que emitir aunque no haya filas`);
+    assert.strictEqual(lectura.onError, 'continueRegularOutput');
+    assert.strictEqual(lectura.parameters.authentication, 'serviceAccount');
+    assert.match(lectura.parameters.documentId.value, /\$env\.SHEETS_DOCUMENT_ID/);
+  }
+
+  // Las pestañas se referencian por nombre, no por ID: el cliente duplica la
+  // plantilla y los nombres viajan con ella, los IDs no.
+  const tabs = ['propiedades', 'negocio', 'faq'].map(
+    (t, i) => nodos.get(['Read Properties Sheet', 'Read Business Sheet', 'Read FAQ Sheet'][i]).parameters.sheetName,
+  );
+  assert.deepStrictEqual(tabs.map((t) => t.value), ['propiedades', 'negocio', 'faq']);
+  assert.deepStrictEqual(tabs.map((t) => t.mode), ['name', 'name', 'name']);
+});
+
+test('si la planilla falla se usa el catálogo del repo', () => {
+  const build = codigo('Build Config');
+
+  assert.match(build, /construirConfig/);
+  assert.match(build, /PROPIEDADES/, 'el respaldo viaja adentro del workflow');
+  assert.match(build, /!fila\.error/, 'una pestaña que falló no puede pasar como datos');
+  assert.match(build, /describirOrigen/, 'y tiene que quedar registrado de dónde salió');
+});
+
+test('los nodos que usan el catálogo lo leen de la config, no del JSON fijo', () => {
+  for (const nombre of ['Match Properties', 'Answer FAQ', 'Validate Visit Request']) {
+    assert.match(codigo(nombre), /\$\('Config Ready'\)/, `"${nombre}" tiene que leer la planilla`);
+  }
+
+  // El horario de la planilla tiene que validar los turnos, no solo aparecer
+  // en el texto: si no, la agencia cambia a "9 a 20", el bot lo dice y sigue
+  // rechazando las 19:30.
+  assert.match(codigo('Validate Visit Request'), /negocio/);
+  assert.match(codigo('Resolve Slot'), /cierreDelDia\(cuando\.getDay\(\), negocio\)/);
+});
+
 test('un saludo no puede terminar en una reserva', () => {
   // Pasó de verdad: con una fecha y una propiedad todavía en memoria, un
   // "hola buenas" se clasificó como continuación y agendó una visita. El

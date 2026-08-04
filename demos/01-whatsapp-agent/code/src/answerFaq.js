@@ -7,6 +7,8 @@
  * o requisitos). Si no hay confianza suficiente, deriva a un humano.
  */
 
+const { resolverPlaceholders } = require('./businessConfig');
+
 const DIACRITICOS = new RegExp('[\\u0300-\\u036f]', 'g');
 
 // Debajo de este puntaje se considera que no entendimos la consulta.
@@ -73,12 +75,17 @@ function puntuarEntrada(entrada, tokens) {
 
 /**
  * @param {string} mensaje texto del cliente
- * @param {Array} faq entradas de faq.json
- * @param {{agencia?: string}} contexto
+ * @param {Array} faq entradas de faq.json o de la pestaña "faq" de la planilla
+ * @param {{agencia?: string, negocio?: object}} contexto
  * @returns {{encontrada: boolean, id: string|null, respuesta: string, puntaje: number, derivar: boolean}}
  */
 function answerFaq(mensaje, faq, contexto) {
-  const agencia = (contexto && contexto.agencia) || 'la inmobiliaria';
+  const negocio = (contexto && contexto.negocio) || null;
+  const agencia = (contexto && contexto.agencia) || (negocio && negocio.nombre) || 'la inmobiliaria';
+  // Las respuestas de la planilla pueden traer {{horarios}}, {{direccion}} o
+  // {{telefono}}: se completan desde la pestaña "negocio", así cambiar el
+  // horario en una celda se propaga a todas las respuestas que lo mencionan.
+  const conDatos = (valor) => resolverPlaceholders(valor, negocio);
   const entradas = Array.isArray(faq) ? faq : [];
   const tokens = tokenizar(mensaje);
 
@@ -98,7 +105,7 @@ function answerFaq(mensaje, faq, contexto) {
       id: saludo.id,
       puntaje: 0,
       derivar: false,
-      respuesta: saludo.respuesta,
+      respuesta: conDatos(saludo.respuesta),
     };
   }
 
@@ -123,7 +130,7 @@ function answerFaq(mensaje, faq, contexto) {
     id: mejor.entrada.id,
     puntaje: mejor.puntaje,
     derivar: false,
-    respuesta: `${mejor.entrada.respuesta}\n\n¿Te quedó alguna otra duda? Estoy para ayudarte 😊`,
+    respuesta: `${conDatos(mejor.entrada.respuesta)}\n\n¿Te quedó alguna otra duda? Estoy para ayudarte 😊`,
   };
 }
 

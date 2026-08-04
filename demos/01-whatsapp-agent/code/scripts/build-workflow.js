@@ -28,7 +28,18 @@ const FIN = '// <<< END GENERATED >>>';
  * Cuidado al agregar módulos a un mismo nodo: no pueden compartir nombres de
  * función o constante, porque terminan concatenados en el mismo scope.
  */
+// Orden importante en varios bundles: sheetValues.js -> sheetCatalog.js ->
+// businessConfig.js -> catalogSource.js, porque cada uno usa al anterior y
+// terminan concatenados en el mismo scope.
 const BUNDLES = {
+  'Load Config': {
+    datos: { PROPIEDADES: 'properties.json', PREGUNTAS_FRECUENTES: 'faq.json' },
+    modulos: ['sheetValues.js', 'sheetCatalog.js', 'businessConfig.js', 'catalogSource.js'],
+  },
+  'Build Config': {
+    datos: { PROPIEDADES: 'properties.json', PREGUNTAS_FRECUENTES: 'faq.json' },
+    modulos: ['sheetValues.js', 'sheetCatalog.js', 'businessConfig.js', 'catalogSource.js'],
+  },
   'Normalize Inbound Message': {
     datos: {},
     modulos: ['phoneNumbers.js', 'voiceNotes.js'],
@@ -63,7 +74,7 @@ const BUNDLES = {
     // answerFaq.js va por esSoloSaludo: un saludo se fuerza a consulta_general
     // acá, sin depender de lo que haya decidido el modelo.
     datos: {},
-    modulos: ['llmProviders.js', 'parseClassification.js', 'answerFaq.js'],
+    modulos: ['llmProviders.js', 'parseClassification.js', 'sheetValues.js', 'businessConfig.js', 'answerFaq.js'],
   },
   'Match Properties': {
     datos: { PROPIEDADES: 'properties.json' },
@@ -75,7 +86,7 @@ const BUNDLES = {
   },
   'Answer FAQ': {
     datos: { PREGUNTAS_FRECUENTES: 'faq.json' },
-    modulos: ['answerFaq.js'],
+    modulos: ['sheetValues.js', 'businessConfig.js', 'answerFaq.js'],
   },
   // Los tres nodos de agendado comparten el mismo trío, y en este orden:
   // scheduling.js usa funciones de calendarEvent.js, que a su vez usa las de
@@ -85,15 +96,15 @@ const BUNDLES = {
     // El catálogo, para resolver el código de propiedad a una dirección real
     // que viaje dentro del evento de Calendar.
     datos: { PROPIEDADES: 'properties.json' },
-    modulos: ['localTime.js', 'calendarEvent.js', 'scheduling.js'],
+    modulos: ['localTime.js', 'calendarEvent.js', 'sheetValues.js', 'businessConfig.js', 'scheduling.js'],
   },
   'Resolve Slot': {
     datos: {},
-    modulos: ['localTime.js', 'calendarEvent.js', 'scheduling.js'],
+    modulos: ['localTime.js', 'calendarEvent.js', 'sheetValues.js', 'businessConfig.js', 'scheduling.js'],
   },
   'Format Scheduling Reply': {
     datos: {},
-    modulos: ['localTime.js', 'calendarEvent.js', 'scheduling.js'],
+    modulos: ['localTime.js', 'calendarEvent.js', 'sheetValues.js', 'businessConfig.js', 'scheduling.js'],
   },
 };
 

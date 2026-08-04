@@ -75,7 +75,7 @@ test('rechaza los domingos', () => {
   // 2026-08-09 es domingo.
   const resultado = parseVisitRequest({ fecha_visita: '2026-08-09', hora_visita: '11:00' }, opciones);
 
-  assert.strictEqual(resultado.motivo, 'domingo_cerrado');
+  assert.strictEqual(resultado.motivo, 'dia_cerrado');
 });
 
 test('rechaza horarios fuera de la atención en día hábil', () => {
@@ -129,7 +129,7 @@ test('la propiedad se pregunta recién cuando el horario ya sirve', () => {
     opciones,
   );
 
-  assert.strictEqual(domingo.motivo, 'domingo_cerrado');
+  assert.strictEqual(domingo.motivo, 'dia_cerrado');
 });
 
 test('si no vino ni la fecha ni la propiedad, se piden juntas', () => {

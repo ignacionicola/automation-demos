@@ -23,10 +23,15 @@
 
 const { normalizarEmail } = require('./calendarEvent');
 const { aRfc3339 } = require('./localTime');
+const { NEGOCIO_POR_DEFECTO, describirHorarios } = require('./businessConfig');
 
-const HORA_APERTURA = 9;
-const HORA_CIERRE = 19;
-const SABADO_CIERRE = 13;
+// Los valores por defecto siguen acá para que todo ande sin planilla, pero el
+// horario real sale de la pestaña "negocio". No puede estar en dos lugares:
+// si la inmobiliaria pone "9 a 20" en su planilla y estas constantes siguen
+// diciendo 19, el bot le contesta un horario y le rechaza otro.
+const HORA_APERTURA = NEGOCIO_POR_DEFECTO.horaApertura;
+const HORA_CIERRE = NEGOCIO_POR_DEFECTO.horaCierre;
+const SABADO_CIERRE = NEGOCIO_POR_DEFECTO.horaCierreSabado;
 
 const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 const MESES = [
@@ -59,9 +64,16 @@ function parsearHora(valor) {
   return { horas, minutos };
 }
 
-function cierreDelDia(diaSemana) {
+/**
+ * A qué hora cierra ese día, o null si no se atiende.
+ *
+ * @param {number} diaSemana  0 = domingo
+ * @param {object} [negocio]  config de la planilla; sin ella, los defaults
+ */
+function cierreDelDia(diaSemana, negocio) {
+  const config = negocio || NEGOCIO_POR_DEFECTO;
   if (diaSemana === 0) return null; // domingo cerrado
-  return diaSemana === 6 ? SABADO_CIERRE : HORA_CIERRE;
+  return diaSemana === 6 ? config.horaCierreSabado : config.horaCierre;
 }
 
 function formatearFechaLegible(cuando) {
@@ -80,6 +92,7 @@ function formatearHoraLegible(cuando) {
  */
 function parseVisitRequest(entidades, opciones) {
   const datos = entidades && typeof entidades === 'object' ? entidades : {};
+  const config = (opciones && opciones.negocio) || NEGOCIO_POR_DEFECTO;
   const ahora = opciones && opciones.ahora ? new Date(opciones.ahora) : new Date();
 
   const fecha = parsearFecha(datos.fecha_visita);
@@ -102,11 +115,14 @@ function parseVisitRequest(entidades, opciones) {
     return { valido: false, motivo: 'fecha_pasada', cuando, faltante: ['fecha'] };
   }
 
-  const cierre = cierreDelDia(cuando.getDay());
+  const cierre = cierreDelDia(cuando.getDay(), config);
   if (cierre === null) {
-    return { valido: false, motivo: 'domingo_cerrado', cuando, faltante: ['fecha'] };
+    // Qué día está cerrado depende de la planilla: el domingo siempre, y el
+    // sábado si la inmobiliaria puso "cerrado". El mensaje tiene que nombrar
+    // el día correcto, no dar por sentado que es domingo.
+    return { valido: false, motivo: 'dia_cerrado', cuando, faltante: ['fecha'], dia: DIAS[cuando.getDay()] };
   }
-  if (hora.horas < HORA_APERTURA || hora.horas >= cierre) {
+  if (hora.horas < config.horaApertura || hora.horas >= cierre) {
     return { valido: false, motivo: 'fuera_de_horario', cuando, faltante: ['hora'] };
   }
 
@@ -170,8 +186,12 @@ function buildVisitRecord(validacion, contacto, entidades, propiedad) {
 
 /** Mensaje al cliente según el resultado de la validación. */
 function formatSchedulingReply(validacion, registro, contexto) {
-  const agencia = (contexto && contexto.agencia) || 'la inmobiliaria';
+  const negocio = (contexto && contexto.negocio) || NEGOCIO_POR_DEFECTO;
+  const agencia = (contexto && contexto.agencia) || negocio.nombre || 'la inmobiliaria';
   const calendario = (contexto && contexto.calendario) || {};
+  // El mismo horario que valida los turnos es el que se le cuenta al cliente:
+  // salen los dos de la planilla, así que no pueden contradecirse.
+  const horarios = describirHorarios(negocio);
 
   if (validacion.valido) {
     // Se la nombra como la nombraría una persona ("el departamento en Las
@@ -221,7 +241,7 @@ function formatSchedulingReply(validacion, registro, contexto) {
       '',
       `Para agendarla, ${pide}`,
       '',
-      'Atendemos de *lunes a viernes de 9 a 19 hs* y los *sábados de 9 a 13 hs*.',
+      `Atendemos de ${horarios}.`,
     ];
 
     if (validacion.sinPropiedad) {
@@ -255,7 +275,7 @@ function formatSchedulingReply(validacion, registro, contexto) {
       return [
         `Justo ese horario lo tenemos tomado, y el *${registro.fechaLegible}* nos quedó completo 🕐`,
         '',
-        '¿Probamos con otro día? Atendemos de *lunes a viernes de 9 a 19 hs* y los *sábados de 9 a 13 hs*.',
+        `¿Probamos con otro día? Atendemos de ${horarios}.`,
       ].join('\n');
     }
 
@@ -273,14 +293,15 @@ function formatSchedulingReply(validacion, registro, contexto) {
     return 'Esa fecha ya pasó 😅 ¿Me pasás un día de acá en adelante y coordinamos?';
   }
 
-  if (validacion.motivo === 'domingo_cerrado') {
-    return 'Los domingos no atendemos 🙈 ¿Te sirve algún día de *lunes a viernes de 9 a 19 hs*, o el *sábado de 9 a 13 hs*?';
+  if (validacion.motivo === 'dia_cerrado') {
+    const dia = validacion.dia === 'sábado' ? 'sábados' : `${validacion.dia || 'domingo'}s`;
+    return `Los ${dia} no atendemos 🙈 ¿Te sirve algún día de ${horarios}?`;
   }
 
   return [
     'Ese horario nos queda fuera de la atención 🕐',
     '',
-    'Podemos coordinar de *lunes a viernes de 9 a 19 hs* o los *sábados de 9 a 13 hs*. ¿Cuál te viene bien?',
+    `Podemos coordinar de ${horarios}. ¿Cuál te viene bien?`,
   ].join('\n');
 }
 
