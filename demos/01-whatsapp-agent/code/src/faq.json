@@ -1,44 +1,110 @@
 [
   {
+    "id": "faq-saludo",
+    "pregunta": "¿Hola?",
+    "claves": [
+      "hola",
+      "buenas",
+      "buen dia",
+      "buenas tardes",
+      "buenas noches",
+      "que tal",
+      "holis",
+      "saludos"
+    ],
+    "respuesta": "¡Hola! 👋 Soy el asistente de la inmobiliaria.\n\nTe puedo ayudar a *buscar propiedades* en alquiler o venta, *coordinar una visita*, o contarte los *requisitos y formas de pago*.\n\n¿Qué estás buscando?"
+  },
+  {
     "id": "faq-horarios",
     "pregunta": "¿Cuál es el horario de atención?",
-    "claves": ["horario", "horarios", "atencion", "abren", "cierran", "abierto", "sabados"],
+    "claves": [
+      "horario",
+      "horarios",
+      "atencion",
+      "abren",
+      "cierran",
+      "abierto",
+      "sabados"
+    ],
     "respuesta": "Atendemos de *lunes a viernes de 9 a 19 hs* y los *sábados de 9 a 13 hs*. Por WhatsApp me podés escribir cuando quieras, que te respondo apenas puedo."
   },
   {
     "id": "faq-direccion",
     "pregunta": "¿Dónde queda la oficina?",
-    "claves": ["direccion", "oficina", "donde", "ubicacion", "quedan", "sucursal"],
+    "claves": [
+      "direccion",
+      "oficina",
+      "donde",
+      "ubicacion",
+      "quedan",
+      "sucursal"
+    ],
     "respuesta": "Estamos en *Av. Colón 1250, Alberdi, Córdoba Capital*. Hay estacionamiento medido sobre la avenida y una playa a media cuadra."
   },
   {
     "id": "faq-requisitos-alquiler",
     "pregunta": "¿Qué requisitos piden para alquilar?",
-    "claves": ["requisitos", "alquilar", "garantia", "garante", "papeles", "documentacion", "necesito"],
+    "claves": [
+      "requisitos",
+      "alquilar",
+      "garantia",
+      "garante",
+      "papeles",
+      "documentacion",
+      "necesito"
+    ],
     "respuesta": "Para alquilar pedimos: *recibo de sueldo* (o monotributo con facturación de los últimos 6 meses), *DNI* y *garantía propietaria en Córdoba* o seguro de caución. Si no tenés garante, trabajamos con seguro de caución y lo resolvemos en 48 hs."
   },
   {
     "id": "faq-comision",
     "pregunta": "¿Cuánto cobran de comisión?",
-    "claves": ["comision", "cobran", "honorarios", "cuanto", "costo", "gastos"],
+    "claves": [
+      "comision",
+      "cobran",
+      "honorarios",
+      "cuanto",
+      "costo",
+      "gastos"
+    ],
     "respuesta": "En alquileres la comisión al inquilino es de *un mes de alquiler* más gastos administrativos. En operaciones de venta trabajamos con el *3% + IVA* sobre el valor de la operación."
   },
   {
     "id": "faq-tasacion",
     "pregunta": "¿Hacen tasaciones?",
-    "claves": ["tasacion", "tasar", "valuacion", "vender", "cuanto vale", "tasan"],
+    "claves": [
+      "tasacion",
+      "tasar",
+      "valuacion",
+      "vender",
+      "cuanto vale",
+      "tasan"
+    ],
     "respuesta": "Sí, hacemos *tasaciones sin cargo* de propiedades en Córdoba Capital y Gran Córdoba. Coordinamos una visita, la tasación te la entregamos por escrito en 72 hs."
   },
   {
     "id": "faq-mascotas",
     "pregunta": "¿Aceptan mascotas en los alquileres?",
-    "claves": ["mascota", "mascotas", "perro", "gato", "animales", "pet"],
+    "claves": [
+      "mascota",
+      "mascotas",
+      "perro",
+      "gato",
+      "animales",
+      "pet"
+    ],
     "respuesta": "Depende de cada propietario y del reglamento del edificio. En casas y PH normalmente no hay problema; en departamentos hay que consultarlo caso por caso. Decime cuál te interesa y lo averiguo."
   },
   {
     "id": "faq-formas-pago",
     "pregunta": "¿Cómo se paga el alquiler?",
-    "claves": ["pago", "pagar", "transferencia", "efectivo", "deposito", "vencimiento"],
+    "claves": [
+      "pago",
+      "pagar",
+      "transferencia",
+      "efectivo",
+      "deposito",
+      "vencimiento"
+    ],
     "respuesta": "El alquiler se paga *del 1 al 10 de cada mes* por transferencia bancaria o débito automático. Te mandamos el recibo digital apenas se acredita."
   }
 ]

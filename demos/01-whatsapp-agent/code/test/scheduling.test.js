@@ -231,6 +231,33 @@ test('al preguntar qué propiedad, ofrece mostrar el catálogo', () => {
   assert.ok(!/c[óo]digo/i.test(mensaje), 'no le pidas un código al cliente');
 });
 
+test('nombra la propiedad como la nombraría una persona', () => {
+  // El cliente dijo "el de Las Flores": contestarle "la propiedad INM-101" le
+  // devuelve un código que él nunca usó. El registro sí guarda el código.
+  const entidades = { ...VISITA, referencia_propiedad: 'el de las flores' };
+  const validacion = parseVisitRequest(entidades, opciones);
+  const registro = buildVisitRecord(validacion, null, entidades, {
+    id: 'INM-101',
+    tipo: 'departamento',
+    barrio: 'Las Flores',
+  });
+
+  assert.strictEqual(registro.propiedad, 'INM-101', 'el registro guarda el código');
+
+  const mensaje = formatSchedulingReply(validacion, registro, { calendario: { creado: true } });
+  assert.match(mensaje, /departamento en Las Flores/);
+  assert.ok(!/INM-101/.test(mensaje), 'al cliente no se le contesta con el código');
+});
+
+test('si no se pudo identificar, se la nombra como la nombró el cliente', () => {
+  const entidades = { ...VISITA, referencia_propiedad: 'el de la esquina' };
+  const validacion = parseVisitRequest(entidades, opciones);
+  const registro = buildVisitRecord(validacion, null, entidades, null);
+  const mensaje = formatSchedulingReply(validacion, registro, { calendario: { creado: true } });
+
+  assert.match(mensaje, /el de la esquina/);
+});
+
 test('sin mail confirma igual, sin prometer una invitación', () => {
   const { validacion, registro } = visitaConfirmada({ email: null });
   const mensaje = formatSchedulingReply(validacion, registro, {

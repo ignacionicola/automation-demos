@@ -645,7 +645,7 @@ so open the node's error output rather than trusting the summary line.
 code/
 ├── src/
 │   ├── properties.json         16 mock properties across two cities, with photos
-│   ├── faq.json                agency FAQ entries
+│   ├── faq.json                agency FAQ entries, including the greeting
 │   ├── matchProperties.js      filtering, scoring, progressive relaxation
 │   ├── formatPropertyReply.js  customer-facing property listings
 │   ├── answerFaq.js            keyword matching over the FAQ set

@@ -138,14 +138,27 @@ function marcarHorarioOcupado(validacion, alternativas) {
   };
 }
 
-/** Fila que se guarda en el registro de visitas. */
-function buildVisitRecord(validacion, contacto, entidades) {
+/**
+ * Fila que se guarda en el registro de visitas.
+ *
+ * @param {object} [propiedad] la del catálogo, si se pudo identificar. Cambia
+ *        qué se guarda y cómo se la nombra: el cliente dijo "el de Las Flores"
+ *        y el registro tiene que decir INM-101, pero el mensaje de vuelta no
+ *        puede contestarle con un código que él nunca usó.
+ */
+function buildVisitRecord(validacion, contacto, entidades, propiedad) {
   const datos = entidades && typeof entidades === 'object' ? entidades : {};
+  const referencia = datos.referencia_propiedad || 'A definir';
+  const ficha = propiedad || null;
+
   return {
     telefono: (contacto && contacto.telefono) || '',
     nombre: (contacto && contacto.nombre) || 'Sin nombre',
     email: normalizarEmail(datos.email),
-    propiedad: datos.referencia_propiedad || 'A definir',
+    propiedad: ficha ? ficha.id : referencia,
+    propiedadTexto: ficha
+      ? [ficha.tipo, ficha.barrio && `en ${ficha.barrio}`].filter(Boolean).join(' ')
+      : null,
     // Con el offset argentino explícito, no en UTC: la fila tiene que decir la
     // misma hora que el evento de Calendar y que el mensaje al cliente.
     fechaIso: validacion.cuando ? aRfc3339(validacion.cuando) : null,
@@ -161,10 +174,12 @@ function formatSchedulingReply(validacion, registro, contexto) {
   const calendario = (contexto && contexto.calendario) || {};
 
   if (validacion.valido) {
+    // Se la nombra como la nombraría una persona ("el departamento en Las
+    // Flores"), no con el código interno, que el cliente no usó.
     const propiedad =
       registro.propiedad === 'A definir'
         ? 'la propiedad que elijas'
-        : `la propiedad *${registro.propiedad}*`;
+        : `*${registro.propiedadTexto || registro.propiedad}*`;
 
     const lineas = [
       `¡Listo! Anoté tu visita a ${propiedad} para el *${registro.fechaLegible} a las ${registro.horaLegible} hs* 📅`,

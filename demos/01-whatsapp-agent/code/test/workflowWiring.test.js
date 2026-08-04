@@ -250,7 +250,16 @@ test('la creación del evento es lo que manda la invitación al cliente', () => 
   // Sin sendUpdates: all Google crea el evento pero no avisa a nadie, que es
   // exactamente lo que el cliente espera recibir.
   assert.strictEqual(crear.additionalFields.sendUpdates, 'all');
-  assert.match(crear.additionalFields.attendees[0], /evento\.invitados/);
+
+  // La expresión tiene que ser el array entero, no un elemento adentro de uno.
+  // Con `[invitados.join(',')]`, una visita sin mail manda un invitado con la
+  // dirección vacía y Google contesta 400: el evento no se crea y el cliente
+  // se queda esperando a un asesor que nadie avisó.
+  assert.strictEqual(
+    crear.additionalFields.attendees,
+    '={{ $json.evento.invitados }}',
+    'sin invitados, el array tiene que quedar vacío',
+  );
   assert.match(crear.start, /evento\.inicio/);
   assert.match(crear.end, /evento\.fin/);
 });

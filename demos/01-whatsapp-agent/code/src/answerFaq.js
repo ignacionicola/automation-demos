@@ -19,6 +19,19 @@ const VACIAS = new Set([
   'hola', 'buenas', 'gracias', 'porfa', 'favor', 'quiero', 'saber', 'decir',
 ]);
 
+// Un saludo no es una pregunta sin responder: es el primer mensaje de casi
+// cualquiera. Derivarlo a un humano gasta una persona en contestar "hola".
+//
+// No se puede resolver agregando una entrada más a faq.json, porque estas
+// palabras están en VACIAS y el matcher por palabras clave nunca las ve. El
+// texto de la respuesta sí vive allá, en la entrada "faq-saludo".
+const SALUDOS = new Set([
+  'hola', 'holis', 'buenas', 'buen', 'dia', 'dias', 'tardes', 'noches',
+  'tal', 'saludos', 'ey', 'hey', 'che', 'buenass',
+]);
+
+const ID_SALUDO = 'faq-saludo';
+
 function normalizar(texto) {
   if (typeof texto !== 'string') return '';
   return texto.normalize('NFD').replace(DIACRITICOS, '').toLowerCase().trim();
@@ -29,6 +42,20 @@ function tokenizar(texto) {
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
     .filter((palabra) => palabra.length > 2 && !VACIAS.has(palabra));
+}
+
+/**
+ * ¿El mensaje es solo un saludo? Se pide que haya al menos una palabra de
+ * saludo y ninguna palabra con contenido: "hola buenas" sí, "hola, tienen
+ * departamentos?" no — eso es una consulta que empieza saludando.
+ */
+function esSoloSaludo(mensaje) {
+  const palabras = normalizar(mensaje)
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+
+  return palabras.some((palabra) => SALUDOS.has(palabra)) && tokenizar(mensaje).length === 0;
 }
 
 function puntuarEntrada(entrada, tokens) {
@@ -62,6 +89,19 @@ function answerFaq(mensaje, faq, contexto) {
 
   const mejor = puntuadas[0];
 
+  // Antes de darse por vencido: un saludo suelto se contesta saludando y
+  // contando qué se puede hacer, que además encamina la conversación.
+  const saludo = entradas.find((entrada) => entrada.id === ID_SALUDO);
+  if ((!mejor || mejor.puntaje < UMBRAL_CONFIANZA) && saludo && esSoloSaludo(mensaje)) {
+    return {
+      encontrada: true,
+      id: saludo.id,
+      puntaje: 0,
+      derivar: false,
+      respuesta: saludo.respuesta,
+    };
+  }
+
   if (!mejor || mejor.puntaje < UMBRAL_CONFIANZA) {
     return {
       encontrada: false,
@@ -87,4 +127,4 @@ function answerFaq(mensaje, faq, contexto) {
   };
 }
 
-module.exports = { answerFaq, tokenizar, normalizar, UMBRAL_CONFIANZA };
+module.exports = { answerFaq, tokenizar, normalizar, esSoloSaludo, UMBRAL_CONFIANZA };

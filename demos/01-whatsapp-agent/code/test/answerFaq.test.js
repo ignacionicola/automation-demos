@@ -1,6 +1,30 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
+const FAQ_REAL = require('../src/faq.json');
+const { esSoloSaludo } = require('../src/answerFaq');
+
+test('un saludo se contesta saludando, no derivando a una persona', () => {
+  // "hola" es el primer mensaje de casi cualquiera. Contestarle "esa no la
+  // tengo respondida, te paso con un asesor" gasta una persona en decir hola.
+  for (const saludo of ['hola buenas', 'Hola!', 'buen día', 'buenas tardes', 'que tal']) {
+    const resultado = require('../src/answerFaq').answerFaq(saludo, FAQ_REAL, {});
+
+    assert.strictEqual(resultado.derivar, false, `"${saludo}" no debería ir a un humano`);
+    assert.strictEqual(resultado.id, 'faq-saludo');
+    assert.match(resultado.respuesta, /buscar propiedades/i, 'y encamina la conversación');
+  }
+});
+
+test('un saludo con una consulta adentro no es solo un saludo', () => {
+  // "hola, tienen departamentos?" es una consulta que empieza saludando: si se
+  // la trata como saludo, se pierde la pregunta.
+  assert.strictEqual(esSoloSaludo('hola, buscan casas?'), false);
+  assert.strictEqual(esSoloSaludo('buenas, que requisitos piden?'), false);
+  assert.strictEqual(esSoloSaludo('hola buenas'), true);
+  assert.strictEqual(esSoloSaludo('me robaron el depto'), false, 'esto sí tiene que ir a un humano');
+});
+
 const { answerFaq, tokenizar } = require('../src/answerFaq');
 const faq = require('../src/faq.json');
 
