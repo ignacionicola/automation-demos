@@ -58,7 +58,11 @@ const ENTIDADES_ACUMULABLES = [
   'referencia_propiedad',
 ];
 
-const CONVERSACION_VACIA = { mensajes: [], entidades: {}, actualizadoEn: 0 };
+const CONVERSACION_VACIA = { mensajes: [], entidades: {}, mostradas: [], actualizadoEn: 0 };
+
+// Cuántas propiedades mostradas se recuerdan. La búsqueda devuelve hasta 3, y
+// guardar más haría que "el primero" apunte a una tanda vieja.
+const MAX_MOSTRADAS = 3;
 
 function esVacio(valor) {
   return valor === null || valor === undefined || valor === '';
@@ -103,8 +107,34 @@ function parseEstado(valor) {
   return {
     mensajes: Array.isArray(crudo.mensajes) ? crudo.mensajes.filter((m) => m && m.texto) : [],
     entidades: crudo.entidades && typeof crudo.entidades === 'object' ? crudo.entidades : {},
+    mostradas: Array.isArray(crudo.mostradas) ? crudo.mostradas.filter((p) => p && p.id) : [],
     actualizadoEn: Number(crudo.actualizadoEn) || 0,
   };
+}
+
+/**
+ * Deja anotado qué propiedades se le mostraron al cliente, para que en el
+ * mensaje siguiente "el primero" o "el de Las Flores" quieran decir algo.
+ *
+ * Hace falta porque la memoria guarda lo que escribe el cliente, no lo que
+ * contesta el bot: sin esto el modelo no tiene forma de saber qué había en la
+ * lista que él mismo mandó.
+ *
+ * @param {object} conversacion
+ * @param {Array} propiedades  las que se mostraron, en el orden en que se mostraron
+ */
+function recordarPropiedadesMostradas(conversacion, propiedades) {
+  const base = conversacion || CONVERSACION_VACIA;
+  const lista = (Array.isArray(propiedades) ? propiedades : [])
+    .filter((p) => p && p.id)
+    .slice(0, MAX_MOSTRADAS)
+    .map((p) => ({ id: p.id, barrio: p.barrio || '', ciudad: p.ciudad || '' }));
+
+  // Una búsqueda sin resultados no borra la tanda anterior: el cliente puede
+  // seguir refiriéndose a lo último que sí vio.
+  if (lista.length === 0) return { ...base };
+
+  return { ...base, mostradas: lista };
 }
 
 function serializarEstado(conversacion) {
@@ -148,7 +178,10 @@ function agregarMensaje(conversacion, turno, ahora, opciones) {
     mensajes.push({ texto, intent: datos.intent || null, en: ahora });
   }
 
+  // Igual que en fusionarEntidades: el spread evita que este return se coma
+  // los campos del estado que no enumera acá.
   return {
+    ...base,
     mensajes: mensajes.slice(-maxMensajes),
     entidades: base.entidades || {},
     actualizadoEn: ahora,
@@ -182,7 +215,12 @@ function reemplazarUltimoMensaje(conversacion, texto) {
 function fusionarEntidades(conversacion, entidades, ahora) {
   const base = conversacion || CONVERSACION_VACIA;
 
+  // El spread no es cosmético: sin él este return arma un objeto nuevo con
+  // solo tres campos y se come el resto del estado en cada mensaje. Ya pasó
+  // con las propiedades mostradas, que se perdían en cuanto el cliente decía
+  // cualquier otra cosa.
   return {
+    ...base,
     mensajes: Array.isArray(base.mensajes) ? base.mensajes : [],
     entidades: combinarEntidades(base.entidades, entidades),
     actualizadoEn: ahora || base.actualizadoEn,
@@ -234,6 +272,18 @@ function formatearContexto(conversacion, mensajeActual) {
     });
   }
 
+  // Sin esto, "el primero" o "el de Las Flores" no tienen contra qué
+  // resolverse: el modelo no ve sus propias respuestas.
+  const mostradas = Array.isArray(conversacion.mostradas) ? conversacion.mostradas : [];
+  if (mostradas.length) {
+    if (partes.length) partes.push('');
+    partes.push('Propiedades que ya le mostraste, en este orden:');
+    mostradas.forEach((propiedad, indice) => {
+      const donde = [propiedad.barrio, propiedad.ciudad].filter(Boolean).join(', ');
+      partes.push(`${indice + 1}. ${propiedad.id}${donde ? ` — ${donde}` : ''}`);
+    });
+  }
+
   return partes.join('\n');
 }
 
@@ -244,6 +294,7 @@ module.exports = {
   estaVigente,
   conversacionActiva,
   agregarMensaje,
+  recordarPropiedadesMostradas,
   reemplazarUltimoMensaje,
   fusionarEntidades,
   formatearContexto,

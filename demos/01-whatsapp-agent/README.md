@@ -106,6 +106,15 @@ flowchart TD
   deterministic and testable — a newly supplied value overrides the stored one,
   an absent one leaves it standing. See
   [why it uses a data table](#why-a-data-table-and-not-workflow-static-data).
+- **Memory also records what the agent showed, not just what the customer
+  said.** *"Me interesa el de Las Flores"* is the natural way to pick one of
+  three listings, and it is unresolvable from the customer's messages alone —
+  the listings were in the agent's reply, which the customer's own history does
+  not contain. So the codes of the last batch shown are stored alongside the
+  entities and go into the prompt as a numbered list, which is what makes *"el
+  primero"* and *"el de Las Flores"* mean something. It is recorded in `Log
+  Delivery Result`, the last Code node every branch passes through and the
+  first point where the search has actually run.
 - **Voice notes go straight to the model, not to a transcription service.**
   Half the enquiries a real agency gets are audio, so treating them as
   "unsupported" hands most of the work back to a human. Meta's webhook carries

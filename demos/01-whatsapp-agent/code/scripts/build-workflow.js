@@ -41,6 +41,12 @@ const BUNDLES = {
     datos: {},
     modulos: ['conversationMemory.js'],
   },
+  // Anota en la memoria qué propiedades se mostraron: es el último Code node
+  // por el que pasan todas las ramas, y para entonces la búsqueda ya corrió.
+  'Log Delivery Result': {
+    datos: {},
+    modulos: ['conversationMemory.js'],
+  },
   'Build LLM Request': {
     datos: {},
     modulos: ['llmProviders.js', 'voiceNotes.js'],

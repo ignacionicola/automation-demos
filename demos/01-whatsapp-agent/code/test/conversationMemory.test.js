@@ -8,6 +8,7 @@ const {
   estaVigente,
   conversacionActiva,
   agregarMensaje,
+  recordarPropiedadesMostradas,
   reemplazarUltimoMensaje,
   fusionarEntidades,
   formatearContexto,
@@ -168,6 +169,75 @@ test('conversacionActiva devuelve algo usable aunque no haya fila', () => {
   assert.deepStrictEqual(vacia.mensajes, []);
   assert.deepStrictEqual(vacia.entidades, {});
   assert.strictEqual(formatearContexto(vacia, 'hola'), '');
+});
+
+const MOSTRADAS = [
+  { id: 'INM-106', barrio: 'Alto Alegre', ciudad: 'Río Tercero' },
+  { id: 'INM-104', barrio: 'Barrio Norte', ciudad: 'Río Tercero' },
+  { id: 'INM-101', barrio: 'Las Flores', ciudad: 'Río Tercero' },
+];
+
+test('el prompt incluye las propiedades que ya se mostraron', () => {
+  // El bug que arregla: la memoria guarda lo que escribe el cliente, no lo que
+  // contesta el bot. Sin esta lista, "el de Las Flores" no tiene contra qué
+  // resolverse y el modelo devuelve null — el cliente eligió y el agente le
+  // vuelve a preguntar cuál.
+  const conLista = recordarPropiedadesMostradas(
+    conversacionActiva(turno(null, 'busco en Río Tercero', {}, AHORA).fila, AHORA),
+    MOSTRADAS,
+  );
+  const contexto = formatearContexto(conLista, 'el de las flores');
+
+  assert.match(contexto, /ya le mostraste/i);
+  assert.match(contexto, /1\. INM-106 — Alto Alegre/);
+  assert.match(contexto, /3\. INM-101 — Las Flores/, 'el orden importa para "el primero"');
+});
+
+test('las propiedades mostradas sobreviven al guardado', () => {
+  const guardado = serializarEstado(recordarPropiedadesMostradas(conversacionActiva(null, AHORA), MOSTRADAS));
+
+  assert.deepStrictEqual(parseEstado(guardado).mostradas, MOSTRADAS);
+});
+
+test('una búsqueda sin resultados no borra lo que el cliente ya vio', () => {
+  // El cliente puede seguir refiriéndose a la última tanda que sí le sirvió.
+  const conLista = recordarPropiedadesMostradas(conversacionActiva(null, AHORA), MOSTRADAS);
+
+  assert.deepStrictEqual(recordarPropiedadesMostradas(conLista, []).mostradas, MOSTRADAS);
+  assert.deepStrictEqual(recordarPropiedadesMostradas(conLista, null).mostradas, MOSTRADAS);
+});
+
+test('solo se recuerda la última tanda, no el historial entero', () => {
+  // Si se acumularan, "el primero" apuntaría a una búsqueda vieja.
+  const primera = recordarPropiedadesMostradas(conversacionActiva(null, AHORA), MOSTRADAS);
+  const segunda = recordarPropiedadesMostradas(primera, [{ id: 'INM-002', barrio: 'Nueva Córdoba' }]);
+
+  assert.strictEqual(segunda.mostradas.length, 1);
+  assert.strictEqual(segunda.mostradas[0].id, 'INM-002');
+});
+
+test('la lista sobrevive a los mensajes que vienen después', () => {
+  // El bug: agregarMensaje y fusionarEntidades armaban el estado nuevo campo
+  // por campo, así que se comían todo lo que no enumeraban. La lista duraba
+  // hasta el mensaje siguiente y desaparecía justo cuando el cliente decía
+  // "el de Las Flores" — que es el único momento en que hace falta.
+  let estado = recordarPropiedadesMostradas(conversacionActiva(null, AHORA), MOSTRADAS);
+
+  estado = agregarMensaje(estado, { mensaje: 'me interesa el de las flores' }, AHORA + 1000);
+  assert.deepStrictEqual(estado.mostradas, MOSTRADAS, 'agregarMensaje no puede perderla');
+
+  estado = fusionarEntidades(estado, { referencia_propiedad: 'INM-101' }, AHORA + 1000);
+  assert.deepStrictEqual(estado.mostradas, MOSTRADAS, 'fusionarEntidades tampoco');
+
+  assert.match(formatearContexto(estado, 'otra cosa'), /INM-101/);
+});
+
+test('una fila vieja sin la lista de mostradas se lee igual', () => {
+  // Compatibilidad hacia atrás: las filas escritas antes de este cambio no
+  // tienen el campo, y no pueden romper la lectura.
+  const vieja = JSON.stringify({ mensajes: [{ texto: 'hola' }], entidades: {}, actualizadoEn: AHORA });
+
+  assert.deepStrictEqual(parseEstado(vieja).mostradas, []);
 });
 
 test('las entidades sin valor no ensucian el prompt', () => {

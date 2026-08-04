@@ -211,6 +211,24 @@ test('la consulta de agenda emite item aunque el día esté libre', () => {
   assert.strictEqual(consulta.parameters.options.outputFormat, 'bookedSlots');
 });
 
+test('lo que se le mostró al cliente queda guardado en la memoria', () => {
+  // "Update Conversation Memory" corre antes del ruteo, así que no puede saber
+  // qué se mostró. "Log Delivery Result" es el último Code node por el que
+  // pasan todas las ramas y para entonces la búsqueda ya corrió: si la
+  // escritura volviera a leer de la memoria vieja, el dato se perdería.
+  const log = codigo('Log Delivery Result');
+
+  assert.match(log, /recordarPropiedadesMostradas/);
+  assert.match(
+    log,
+    /intent === 'consulta_propiedad'/,
+    'a Format Property Reply solo se le puede pedir datos si esa rama corrió',
+  );
+
+  const guardado = nodos.get('Save Conversation Memory').parameters.columns.value;
+  assert.match(guardado.estado, /Log Delivery Result/, 'tiene que guardar el estado enriquecido');
+});
+
 test('el calendario se referencia con un ID que el nodo acepte', () => {
   // El campo valida contra una regex con forma de mail y rechaza el valor
   // antes de llamar a Google, así que "primary" no sirve por más que sea el
