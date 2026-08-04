@@ -59,8 +59,11 @@ const BUNDLES = {
     // llmProviders.js primero: parseClassification.js llama a extractLlmText,
     // que tiene que estar ya definida en el scope cuando se inyectan las dos
     // en el mismo Code node.
+    //
+    // answerFaq.js va por esSoloSaludo: un saludo se fuerza a consulta_general
+    // acá, sin depender de lo que haya decidido el modelo.
     datos: {},
-    modulos: ['llmProviders.js', 'parseClassification.js'],
+    modulos: ['llmProviders.js', 'parseClassification.js', 'answerFaq.js'],
   },
   'Match Properties': {
     datos: { PROPIEDADES: 'properties.json' },

@@ -8,6 +8,7 @@ const {
   estaVigente,
   conversacionActiva,
   agregarMensaje,
+  olvidarVisita,
   recordarPropiedadesMostradas,
   reemplazarUltimoMensaje,
   fusionarEntidades,
@@ -230,6 +231,33 @@ test('la lista sobrevive a los mensajes que vienen después', () => {
   assert.deepStrictEqual(estado.mostradas, MOSTRADAS, 'fusionarEntidades tampoco');
 
   assert.match(formatearContexto(estado, 'otra cosa'), /INM-101/);
+});
+
+test('una visita agendada deja de ocupar la memoria', () => {
+  // El bug: los datos de la visita quedaban cargados después de agendar, y el
+  // mensaje siguiente los reusaba. Un "hola" clasificado como continuación
+  // encontraba fecha, hora y propiedad listas y agendaba de nuevo.
+  const agendada = turno(
+    null,
+    'quiero visitar la INM-101 el lunes a las 10',
+    { fecha_visita: '2026-08-10', hora_visita: '10:00', referencia_propiedad: 'INM-101', barrio: 'Las Flores' },
+    AHORA,
+  );
+
+  const despues = olvidarVisita(agendada.conversacion);
+
+  assert.strictEqual(despues.entidades.fecha_visita, null);
+  assert.strictEqual(despues.entidades.hora_visita, null);
+  assert.strictEqual(despues.entidades.referencia_propiedad, null);
+  // Lo que describe qué busca el cliente sigue valiendo: no se agendó "el
+  // barrio", se agendó una visita.
+  assert.strictEqual(despues.entidades.barrio, 'Las Flores');
+
+  assert.ok(!/fecha_visita/.test(formatearContexto(despues, 'hola')), 'ni aparece en el prompt');
+});
+
+test('olvidar la visita no rompe una conversación vacía', () => {
+  assert.deepStrictEqual(olvidarVisita(null).entidades.fecha_visita, null);
 });
 
 test('una fila vieja sin la lista de mostradas se lee igual', () => {

@@ -211,6 +211,29 @@ test('la consulta de agenda emite item aunque el día esté libre', () => {
   assert.strictEqual(consulta.parameters.options.outputFormat, 'bookedSlots');
 });
 
+test('un saludo no puede terminar en una reserva', () => {
+  // Pasó de verdad: con una fecha y una propiedad todavía en memoria, un
+  // "hola buenas" se clasificó como continuación y agendó una visita. El
+  // freno va en código, no en el prompt: no puede depender del modelo.
+  const parse = codigo('Parse Classification');
+
+  assert.match(parse, /esSoloSaludo/);
+  assert.match(
+    parse,
+    /esSaludo \? 'consulta_general' : resultado\.intent/,
+    'el saludo pisa lo que haya decidido el modelo',
+  );
+});
+
+test('una visita agendada se borra de la memoria', () => {
+  // Si sus datos siguieran cargados, el próximo mensaje corto los reusaría y
+  // agendaría una segunda visita que nadie pidió.
+  const log = codigo('Log Delivery Result');
+
+  assert.match(log, /olvidarVisita/);
+  assert.match(log, /validacion\.valido/, 'solo si de verdad se agendó');
+});
+
 test('lo que se le mostró al cliente queda guardado en la memoria', () => {
   // "Update Conversation Memory" corre antes del ruteo, así que no puede saber
   // qué se mostró. "Log Delivery Result" es el último Code node por el que

@@ -112,6 +112,27 @@ function parseEstado(valor) {
   };
 }
 
+// Lo que deja de valer apenas la visita quedó agendada. El resto de las
+// entidades (barrio, presupuesto, tipo) siguen describiendo lo que el cliente
+// busca y no hay motivo para olvidarlas.
+const ENTIDADES_DE_LA_VISITA = ['fecha_visita', 'hora_visita', 'referencia_propiedad'];
+
+/**
+ * Olvida los datos de una visita que ya se agendó.
+ *
+ * Sin esto quedan cargados y el próximo mensaje corto los vuelve a usar: un
+ * "hola" clasificado como continuación encuentra fecha, hora y propiedad
+ * listas y agenda una segunda visita que nadie pidió. Pasó de verdad.
+ */
+function olvidarVisita(conversacion) {
+  const base = conversacion || CONVERSACION_VACIA;
+  const entidades = { ...(base.entidades || {}) };
+
+  for (const clave of ENTIDADES_DE_LA_VISITA) entidades[clave] = null;
+
+  return { ...base, entidades };
+}
+
 /**
  * Deja anotado qué propiedades se le mostraron al cliente, para que en el
  * mensaje siguiente "el primero" o "el de Las Flores" quieran decir algo.
@@ -294,7 +315,9 @@ module.exports = {
   estaVigente,
   conversacionActiva,
   agregarMensaje,
+  olvidarVisita,
   recordarPropiedadesMostradas,
+  ENTIDADES_DE_LA_VISITA,
   reemplazarUltimoMensaje,
   fusionarEntidades,
   formatearContexto,

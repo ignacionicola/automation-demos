@@ -161,6 +161,13 @@ flowchart TD
   every date sent to Calendar carries the `-03:00` offset. `npm test` runs the
   whole suite twice, once in the machine's timezone and once in UTC, because
   this is precisely the class of bug that passes locally and fails on deploy.
+- **A greeting can never become a booking.** With a date and a property still
+  in memory, *"hola buenas"* was classified as a continuation of the previous
+  request and booked a viewing nobody asked for. Two independent guards now
+  prevent it: a booked visit drops its date, time and property from memory, and
+  a message that is only a greeting is forced to `consulta_general` in code —
+  not in the prompt, because that is precisely the kind of judgement this
+  workflow does not delegate to the model.
 - **The model's output is never trusted.** `Parse Classification` re-parses the
   JSON (tolerating markdown fences), checks the intent against a whitelist and
   enforces a minimum confidence of `0.6`. Anything that fails becomes
@@ -808,10 +815,11 @@ This is a portfolio demo, so a few things are deliberately simplified:
   ignored on read and overwritten on the next message from that number, but the
   row stays. A long-running deployment should delete rows by `actualizadoEn`
   on a schedule.
-- **Accumulated entities are not cleared once acted on.** Within the 30-minute
-  window, a date given for one viewing is still on file if the customer then
-  asks about a different property. Clearing them per intent would be the next
-  refinement.
+- **Only the visit's entities are cleared once acted on.** A booked viewing
+  drops its date, time and property from memory, because leaving them there
+  meant the next short message re-used them and booked again. The search
+  entities (neighbourhood, budget, type) deliberately survive: those still
+  describe what the customer is looking for.
 - **Voice notes need Gemini.** Anthropic takes no audio at all, and Groq
   transcribes through a separate Whisper endpoint — another request and another
   piece of configuration. With either of those set as `LLM_PROVIDER` an audio
