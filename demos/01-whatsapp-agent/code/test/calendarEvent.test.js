@@ -5,6 +5,7 @@ const {
   esEmailValido,
   normalizarEmail,
   bloquesOcupados,
+  buscarPropiedad,
   seSolapa,
   buscarAlternativas,
   formatearAlternativas,
@@ -147,6 +148,37 @@ test('si el día está completo no inventa alternativas', () => {
   });
 
   assert.deepStrictEqual(horas, []);
+});
+
+test('ubica la propiedad aunque el cliente no diga el código', () => {
+  // Nadie dice "la INM-013" en voz alta. El clasificador resuelve la
+  // referencia contra el contexto cuando puede, pero cuando devuelve texto
+  // suelto igual hay que poder ubicar la dirección para el evento.
+  const catalogo = [
+    { id: 'INM-002', barrio: 'Nueva Córdoba', ciudad: 'Córdoba' },
+    { id: 'INM-013', barrio: 'Las Flores', ciudad: 'Río Tercero' },
+    { id: 'INM-014', barrio: 'Las Violetas', ciudad: 'Río Tercero' },
+  ];
+
+  assert.strictEqual(buscarPropiedad('INM-013', catalogo).id, 'INM-013');
+  assert.strictEqual(buscarPropiedad('inm-013', catalogo).id, 'INM-013', 'sin importar mayúsculas');
+  assert.strictEqual(buscarPropiedad('quiero ver la INM-013', catalogo).id, 'INM-013', 'código en una frase');
+  assert.strictEqual(buscarPropiedad('el de Las Flores', catalogo).id, 'INM-013', 'por barrio');
+  assert.strictEqual(buscarPropiedad('el de nueva cordoba', catalogo).id, 'INM-002', 'sin tildes');
+});
+
+test('con dos propiedades en el mismo barrio no adivina', () => {
+  // Una dirección equivocada en la agenda es peor que ninguna: el asesor
+  // viaja al lugar incorrecto.
+  const catalogo = [
+    { id: 'INM-013', barrio: 'Las Flores', ciudad: 'Río Tercero' },
+    { id: 'INM-020', barrio: 'Las Flores', ciudad: 'Río Tercero' },
+  ];
+
+  assert.strictEqual(buscarPropiedad('el de Las Flores', catalogo), null);
+  assert.strictEqual(buscarPropiedad('A definir', catalogo), null);
+  assert.strictEqual(buscarPropiedad('', catalogo), null);
+  assert.strictEqual(buscarPropiedad('INM-999', catalogo), null);
 });
 
 test('el evento lleva la hora con offset argentino y la duración de una visita', () => {

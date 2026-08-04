@@ -119,6 +119,45 @@ function formatearAlternativas(alternativas) {
   return (Array.isArray(alternativas) ? alternativas : []).map(aHoraIso).filter(Boolean);
 }
 
+function normalizarTexto(valor) {
+  return String(valor || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    // Saca las tildes: "Río Tercero" y "Rio Tercero" son el mismo lugar.
+    .replace(/[̀-ͯ]/g, '');
+}
+
+/**
+ * Ubica la propiedad de la que habla el cliente dentro del catálogo.
+ *
+ * El clasificador devuelve el código cuando puede resolverlo contra el
+ * contexto, pero nadie dice "la INM-013" en voz alta: lo normal es "el de Las
+ * Flores". Cuando llega eso, se busca por barrio — y solo si hay una sola
+ * propiedad en ese barrio, porque con dos no se sabe cuál quiso decir y es
+ * mejor un evento sin dirección que uno con la dirección equivocada.
+ *
+ * @returns {object|null} la propiedad, o null si no se puede identificar una sola
+ */
+function buscarPropiedad(referencia, propiedades) {
+  const catalogo = Array.isArray(propiedades) ? propiedades : [];
+  const buscado = normalizarTexto(referencia);
+  if (!buscado || buscado === 'a definir') return null;
+
+  const porCodigo = catalogo.find((fila) => normalizarTexto(fila.id) === buscado);
+  if (porCodigo) return porCodigo;
+
+  // El código puede venir embebido en una frase ("quiero ver la INM-013").
+  const mencionado = catalogo.find((fila) => fila.id && buscado.includes(normalizarTexto(fila.id)));
+  if (mencionado) return mencionado;
+
+  const porBarrio = catalogo.filter((fila) => {
+    const barrio = normalizarTexto(fila.barrio);
+    return barrio && buscado.includes(barrio);
+  });
+  return porBarrio.length === 1 ? porBarrio[0] : null;
+}
+
 function describirPropiedad(propiedad, referencia) {
   if (propiedad && propiedad.id) {
     return [propiedad.id, propiedad.tipo, propiedad.barrio].filter(Boolean).join(' · ');
@@ -184,6 +223,7 @@ module.exports = {
   esEmailValido,
   normalizarEmail,
   bloquesOcupados,
+  buscarPropiedad,
   seSolapa,
   buscarAlternativas,
   formatearAlternativas,

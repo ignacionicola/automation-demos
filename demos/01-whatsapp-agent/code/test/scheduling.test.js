@@ -223,10 +223,12 @@ test('al preguntar qué propiedad, ofrece mostrar el catálogo', () => {
   const { validacion, registro } = visitaConfirmada({ referencia_propiedad: null });
   const mensaje = formatSchedulingReply(validacion, registro, {});
 
-  assert.match(mensaje, /qué propiedad/i);
+  assert.match(mensaje, /cuál querés visitar/i);
   assert.match(mensaje, /te muestro/i, 'tiene que ofrecer la otra salida');
   assert.match(mensaje, /miércoles 5 de agosto/, 'confirma el horario que ya se habló');
   assert.match(mensaje, /16:00/);
+  // Pedirle "el código" suena a formulario, y nadie dice "la INM-013" hablando.
+  assert.ok(!/c[óo]digo/i.test(mensaje), 'no le pidas un código al cliente');
 });
 
 test('sin mail confirma igual, sin prometer una invitación', () => {

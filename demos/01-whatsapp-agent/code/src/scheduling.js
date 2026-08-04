@@ -221,12 +221,15 @@ function formatSchedulingReply(validacion, registro, contexto) {
     // se las muestre. La segunda cae sola en la búsqueda del catálogo, que ya
     // contesta con fotos — y la fecha queda guardada en la memoria mientras
     // tanto, así que el turno no se pierde.
+    // Sin pedirle el código: nadie habla así. Alcanza con el barrio o un "el
+    // primero", que el clasificador resuelve contra el contexto — la
+    // referencia interna la reconstruye el sistema, no el cliente.
     return [
       `Perfecto, me anoto el *${registro.fechaLegible} a las ${registro.horaLegible} hs* 📅`,
       '',
-      '¿Qué propiedad querés visitar? Si tenés el código a mano pasámelo.',
+      '¿Cuál querés visitar? Con que me digas el barrio o la referencia alcanza.',
       '',
-      'Y si todavía no elegiste, decime qué estás buscando y te muestro las que tengo. 🏠',
+      'Y si todavía no elegiste, contame qué estás buscando y te muestro las que tengo. 🏠',
     ].join('\n');
   }
 
