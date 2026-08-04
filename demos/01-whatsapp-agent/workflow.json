@@ -952,7 +952,7 @@
         "operation": "availability",
         "calendar": {
           "__rl": true,
-          "value": "={{ $env.GOOGLE_CALENDAR_ID || 'primary' }}",
+          "value": "={{ $env.GOOGLE_CALENDAR_ID }}",
           "mode": "id"
         },
         "timeMin": "={{ $json.evento.ventanaDia.desde }}",
@@ -1038,7 +1038,7 @@
         "operation": "create",
         "calendar": {
           "__rl": true,
-          "value": "={{ $env.GOOGLE_CALENDAR_ID || 'primary' }}",
+          "value": "={{ $env.GOOGLE_CALENDAR_ID }}",
           "mode": "id"
         },
         "start": "={{ $json.evento.inicio }}",

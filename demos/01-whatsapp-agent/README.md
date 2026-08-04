@@ -323,6 +323,14 @@ attendees, which is the whole point.
    that n8n shows in the credential screen in the next step — for a local
    instance it is `http://localhost:5678/rest/oauth2-credential/callback`.
 5. Copy the **Client ID** and **Client Secret**.
+6. Note the **calendar ID** for `GOOGLE_CALENDAR_ID`. For your main calendar
+   that is simply your Google account's email address — the node's ID field
+   validates against an email-shaped pattern, so `primary` is rejected before
+   the request is ever made.
+
+> On the Google consent screen, grant **both** scopes. The workflow needs to
+> read the calendar (the `freeBusy` availability check) *and* create events;
+> approving only one produces an `insufficientPermissions` failure at runtime.
 
 > **Scope:** n8n's Google Calendar credential requests
 > `https://www.googleapis.com/auth/calendar` — read and write on your
@@ -376,7 +384,7 @@ Copy `.env.example` to `.env` and set the values on your n8n instance:
 | `LLM_API_URL` | Optional. Overrides the provider's default endpoint entirely | *(leave empty)* |
 | `LLM_THINKING_LEVEL` | Gemini only. `minimal` (default), `low`, `medium`, `high`, or `off` to omit the field for Gemini 2.5-era models | *(leave empty)* |
 | `AGENCY_NAME` | Agency name used in customer-facing copy | `Inmobiliaria Demo` |
-| `GOOGLE_CALENDAR_ID` | Which calendar receives the visits. Empty or `primary` = the main calendar of the account that authorised the credential | `primary` |
+| `GOOGLE_CALENDAR_ID` | Which calendar receives the visits, as a calendar ID. **Not** the string `primary` — the node validates this field against an email-shaped pattern and rejects anything else before calling Google. Your main calendar's ID *is* your account's email address | `your-account@gmail.com` |
 
 **Required n8n setting:** n8n blocks environment access from inside nodes by
 default. Set `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` on the instance, otherwise

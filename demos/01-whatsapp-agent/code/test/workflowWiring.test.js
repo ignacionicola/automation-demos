@@ -211,6 +211,20 @@ test('la consulta de agenda emite item aunque el día esté libre', () => {
   assert.strictEqual(consulta.parameters.options.outputFormat, 'bookedSlots');
 });
 
+test('el calendario se referencia con un ID que el nodo acepte', () => {
+  // El campo valida contra una regex con forma de mail y rechaza el valor
+  // antes de llamar a Google, así que "primary" no sirve por más que sea el
+  // alias que usa la API. Costó una tanda de mensajes averiguarlo: el nodo
+  // falla con "Calendar parameter's value is invalid", que no lo dice.
+  for (const nombre of ['Check Calendar Availability', 'Create Calendar Event']) {
+    const calendario = nodos.get(nombre).parameters.calendar;
+
+    assert.strictEqual(calendario.mode, 'id');
+    assert.match(calendario.value, /\$env\.GOOGLE_CALENDAR_ID/, 'el calendario se configura por entorno');
+    assert.ok(!/primary/.test(calendario.value), '"primary" no pasa la validación del campo');
+  }
+});
+
 test('la creación del evento es lo que manda la invitación al cliente', () => {
   const crear = nodos.get('Create Calendar Event').parameters;
 
