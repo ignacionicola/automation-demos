@@ -233,11 +233,11 @@ test('las tres pestañas se traen en una sola llamada', () => {
   assert.match(lectura.parameters.url, /values:batchGet/);
   assert.match(lectura.parameters.url, /\$env\.SHEETS_DOCUMENT_ID/);
 
-  // Las pestañas se piden por nombre: el cliente duplica la plantilla y los
-  // nombres viajan con ella, los IDs no.
-  const rangos = lectura.parameters.queryParameters.parameters
-    .filter((p) => p.name === 'ranges')
-    .map((p) => p.value);
+  // Los tres rangos van en la URL y no en queryParameters: n8n colapsa los
+  // parámetros repetidos, así que de los tres 'ranges' mandaba uno y Google
+  // devolvía una sola pestaña. El catálogo quedaba vacío sin que nada fallara.
+  assert.ok(!lectura.parameters.sendQuery, 'los ranges repetidos no sobreviven a queryParameters');
+  const rangos = [...lectura.parameters.url.matchAll(/ranges=([^&]+)/g)].map((m) => m[1]);
   assert.deepStrictEqual(rangos, ['propiedades', 'negocio', 'faq']);
 
   // Y sigue sin poder cortar el flujo: cero filas o un fallo caen al respaldo.
