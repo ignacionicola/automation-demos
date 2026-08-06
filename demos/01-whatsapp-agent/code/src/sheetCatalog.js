@@ -70,6 +70,30 @@ function filasDeRango(rango) {
     });
 }
 
+/**
+ * Encuentra el rango de una pestaña dentro de la respuesta de `values:batchGet`.
+ *
+ * Por nombre y no por posición: la respuesta no vuelve necesariamente en el
+ * orden en que se pidieron los rangos, y tomarlos por índice hacía que la FAQ
+ * se leyera como catálogo de propiedades — con el resultado de que el agente
+ * decía no tener nada en Río Tercero teniendo seis.
+ *
+ * Cada rango viene etiquetado ("propiedades!A1:Z1000", o con comillas si el
+ * nombre tiene espacios), así que se compara contra eso.
+ */
+function buscarRango(rangos, pestania) {
+  const lista = Array.isArray(rangos) ? rangos : [];
+  const buscada = String(pestania || '').toLowerCase();
+
+  return (
+    lista.find((rango) => {
+      const etiqueta = String((rango && rango.range) || '');
+      const nombre = etiqueta.split('!')[0].replace(/^'|'$/g, '').toLowerCase();
+      return nombre === buscada;
+    }) || null
+  );
+}
+
 function sinTildes(texto) {
   return String(texto || '')
     .normalize('NFD')
@@ -180,6 +204,7 @@ module.exports = {
   parsearPropiedad,
   parsearCatalogo,
   filasDeRango,
+  buscarRango,
   valorDe,
   encajarEn,
   normalizarMoneda,

@@ -257,6 +257,11 @@ test('si la planilla falla se usa el catálogo del repo', () => {
   assert.match(build, /construirConfig/);
   assert.match(build, /PROPIEDADES/, 'el respaldo viaja adentro del workflow');
   assert.match(build, /filasDeRango/, 'la respuesta de batchGet trae arrays, no objetos');
+  assert.match(
+    build,
+    /buscarRango\(rangos, pestania\)/,
+    'los rangos se ubican por nombre: no vuelven en el orden en que se piden',
+  );
   assert.match(build, /describirOrigen/, 'y tiene que quedar registrado de dónde salió');
 });
 

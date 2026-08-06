@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { parsearPropiedad, parsearCatalogo, filasDeRango } = require('../src/sheetCatalog');
+const { parsearPropiedad, parsearCatalogo, filasDeRango, buscarRango } = require('../src/sheetCatalog');
 const { matchProperties } = require('../src/matchProperties');
 
 /** Una fila como la escribiría alguien en la planilla. */
@@ -24,6 +24,25 @@ const FILA = {
   destacados: 'Balcón | Cochera | Apto crédito',
   foto: 'https://ejemplo.com/101.jpg',
 };
+
+test('los rangos se ubican por nombre, no por el orden en que vuelven', () => {
+  // Pasó de verdad: se pidió propiedades/negocio/faq y Google devolvió la faq
+  // primera. Leyéndolos por índice, las 8 filas de la FAQ se parsearon como el
+  // catálogo y el agente contestó que no tenía nada en Río Tercero — teniendo
+  // seis propiedades ahí.
+  const rangos = [
+    { range: 'faq!A1:Z1000', values: [['id']] },
+    { range: 'propiedades!A1:Z1000', values: [['id']] },
+    { range: "'negocio'!A1:Z1000", values: [['clave']] },
+  ];
+
+  assert.strictEqual(buscarRango(rangos, 'propiedades').range, 'propiedades!A1:Z1000');
+  assert.strictEqual(buscarRango(rangos, 'faq').range, 'faq!A1:Z1000');
+  // Sheets entrecomilla el nombre cuando tiene espacios o caracteres raros.
+  assert.strictEqual(buscarRango(rangos, 'negocio').range, "'negocio'!A1:Z1000");
+  assert.strictEqual(buscarRango(rangos, 'inexistente'), null);
+  assert.strictEqual(buscarRango(null, 'propiedades'), null);
+});
 
 test('las filas de batchGet se convierten en objetos por encabezado', () => {
   // batchGet devuelve arrays y la primera fila son los encabezados. Los nodos
