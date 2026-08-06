@@ -63,8 +63,8 @@ test('solo se acepta una URL que Meta pueda descargar', () => {
   assert.strictEqual(celdaUrl('https://ejemplo.com/foto.jpg'), 'https://ejemplo.com/foto.jpg');
   // Sin extensión también vale: los CDN sirven imágenes así todo el tiempo.
   assert.strictEqual(
-    celdaUrl('https://images.unsplash.com/photo-1583608205776?w=1080&fm=jpg'),
-    'https://images.unsplash.com/photo-1583608205776?w=1080&fm=jpg',
+    celdaUrl('https://cdn.inmobiliaria.com.ar/fotos/101?size=large'),
+    'https://cdn.inmobiliaria.com.ar/fotos/101?size=large',
   );
   // Meta baja la imagen desde su servidor: una nota o una ruta local no sirven.
   for (const invalida of ['ver carpeta', 'C:\\fotos\\1.jpg', 'foto.jpg', '', null]) {
@@ -89,6 +89,27 @@ test('una página que muestra la foto no es la foto', () => {
   for (const pagina of paginas) {
     assert.strictEqual(celdaUrl(pagina), null, `${pagina} devuelve HTML, no una imagen`);
   }
+});
+
+test('las URLs de Unsplash se fuerzan a JPEG', () => {
+  // Con `auto=format`, el CDN negocia el formato con quien descarga: le sirve
+  // AVIF o WebP a cualquiera que los acepte, y WhatsApp solo entiende JPEG y
+  // PNG. Meta acepta el envío, baja un AVIF y descarta el mensaje en silencio.
+  //
+  // Es especialmente traicionero porque un curl normal recibe JPEG, así que la
+  // URL se ve perfecta hasta que el mensaje no llega.
+  const conAutoFormat =
+    'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?q=80&w=1170&auto=format&fit=crop&ixid=M3wxMjA3';
+
+  assert.strictEqual(
+    celdaUrl(conAutoFormat),
+    'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=1080&q=80&fm=jpg',
+  );
+  // Y una que ya venía bien no se rompe: queda igual de explícita.
+  assert.strictEqual(
+    celdaUrl('https://images.unsplash.com/photo-1583608205776?w=1080&q=80&fm=jpg'),
+    'https://images.unsplash.com/photo-1583608205776?w=1080&q=80&fm=jpg',
+  );
 });
 
 test('los links de Drive y Dropbox se arreglan solos', () => {

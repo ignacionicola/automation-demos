@@ -127,9 +127,9 @@ const PAGINAS_QUE_NO_SIRVEN_LA_IMAGEN = [
   /^https?:\/\/(www\.)?icloud\.com\//i,
 ];
 
-// Estas dos sí se pueden arreglar solas, y son las que una inmobiliaria va a
-// usar de verdad: el link que copia del botón "Compartir" apunta a la página,
-// pero el archivo está a un parámetro de distancia.
+// Estas sí se pueden arreglar solas, y son las que una inmobiliaria va a usar
+// de verdad: el link que copia del botón "Compartir" apunta a la página, pero
+// el archivo está a un parámetro de distancia.
 const REPARABLES = [
   {
     reconoce: /^https?:\/\/drive\.google\.com\/file\/d\/([^/?#]+)/i,
@@ -138,6 +138,17 @@ const REPARABLES = [
   {
     reconoce: /^(https?:\/\/(?:www\.)?dropbox\.com\/[^?#]+)/i,
     arregla: (m) => `${m[1]}?raw=1`,
+  },
+  {
+    // El CDN de Unsplash negocia el formato con quien pide: `auto=format` le
+    // sirve AVIF o WebP a cualquiera que los acepte, y WhatsApp solo entiende
+    // JPEG y PNG. Meta acepta el envío, descarga un AVIF y descarta el mensaje
+    // sin decir nada, igual que con una página HTML.
+    //
+    // Cuesta encontrarlo porque un `curl` normal recibe JPEG —no manda el
+    // Accept que dispara la negociación—, así que la URL parece sana.
+    reconoce: /^https?:\/\/images\.unsplash\.com\/[^?#]+/i,
+    arregla: (m) => `${m[0]}?w=1080&q=80&fm=jpg`,
   },
 ];
 
