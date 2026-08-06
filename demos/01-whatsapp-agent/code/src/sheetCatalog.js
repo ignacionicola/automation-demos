@@ -39,6 +39,37 @@ const COLUMNAS = {
 const OPERACIONES = ['alquiler', 'venta'];
 const TIPOS = ['departamento', 'casa', 'ph', 'local'];
 
+/**
+ * Convierte un rango de `values:batchGet` —filas como arrays, la primera con
+ * los encabezados— en filas como objetos, que es lo que espera todo lo demás.
+ *
+ * Existe porque las tres pestañas se traen en una sola llamada HTTP en vez de
+ * con tres nodos de Google Sheets. Esos nodos ya devolvían objetos, pero cada
+ * uno pedía su propio token: tres pedidos seguidos y Google empezaba a
+ * frenarlos, hasta 65 segundos para la tercera pestaña. Una sola llamada trae
+ * todo en poco más de un segundo, al costo de armar los objetos acá.
+ *
+ * Se descartan las filas totalmente vacías: una planilla siempre tiene unas
+ * cuantas al final.
+ */
+function filasDeRango(rango) {
+  const valores = (rango && rango.values) || [];
+  if (valores.length < 2) return [];
+
+  const encabezados = valores[0].map((h) => String(h == null ? '' : h).trim());
+
+  return valores
+    .slice(1)
+    .filter((fila) => Array.isArray(fila) && fila.some((c) => String(c == null ? '' : c).trim() !== ''))
+    .map((fila) => {
+      const objeto = {};
+      encabezados.forEach((encabezado, i) => {
+        if (encabezado) objeto[encabezado] = fila[i] === undefined ? '' : fila[i];
+      });
+      return objeto;
+    });
+}
+
 function sinTildes(texto) {
   return String(texto || '')
     .normalize('NFD')
@@ -148,6 +179,7 @@ function parsearCatalogo(filas) {
 module.exports = {
   parsearPropiedad,
   parsearCatalogo,
+  filasDeRango,
   valorDe,
   encajarEn,
   normalizarMoneda,

@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { parsearPropiedad, parsearCatalogo } = require('../src/sheetCatalog');
+const { parsearPropiedad, parsearCatalogo, filasDeRango } = require('../src/sheetCatalog');
 const { matchProperties } = require('../src/matchProperties');
 
 /** Una fila como la escribiría alguien en la planilla. */
@@ -24,6 +24,49 @@ const FILA = {
   destacados: 'Balcón | Cochera | Apto crédito',
   foto: 'https://ejemplo.com/101.jpg',
 };
+
+test('las filas de batchGet se convierten en objetos por encabezado', () => {
+  // batchGet devuelve arrays y la primera fila son los encabezados. Los nodos
+  // de Google Sheets hacían esta conversión solos, pero cada uno costaba un
+  // token: ahora se traen las tres pestañas de una y se arma acá.
+  const filas = filasDeRango({
+    range: 'propiedades!A1:Z1000',
+    values: [
+      ['id', 'titulo', 'precio'],
+      ['INM-101', 'Casa en Las Flores', '420.000'],
+      ['INM-102', 'PH en Alberdi', ''],
+    ],
+  });
+
+  assert.deepStrictEqual(filas, [
+    { id: 'INM-101', titulo: 'Casa en Las Flores', precio: '420.000' },
+    { id: 'INM-102', titulo: 'PH en Alberdi', precio: '' },
+  ]);
+});
+
+test('las filas vacías del final de la planilla no ensucian nada', () => {
+  // Toda planilla tiene unas cuantas, y Sheets manda arrays cortos cuando las
+  // últimas columnas están vacías.
+  const filas = filasDeRango({
+    values: [
+      ['id', 'titulo', 'precio'],
+      ['INM-101'],
+      [],
+      ['', '', ''],
+    ],
+  });
+
+  assert.strictEqual(filas.length, 1);
+  assert.deepStrictEqual(filas[0], { id: 'INM-101', titulo: '', precio: '' });
+});
+
+test('un rango que no vino no rompe: son cero filas', () => {
+  // Es lo que pasa cuando la llamada falla — construirConfig lo lee como
+  // pestaña vacía y cae al respaldo del repo.
+  for (const vacio of [undefined, null, {}, { values: [] }, { values: [['id', 'titulo']] }]) {
+    assert.deepStrictEqual(filasDeRango(vacio), [], JSON.stringify(vacio));
+  }
+});
 
 test('una fila de la planilla se convierte en una propiedad usable', () => {
   const p = parsearPropiedad(FILA);
