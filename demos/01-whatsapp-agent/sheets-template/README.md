@@ -45,12 +45,25 @@ searches.
 | `destacados` | Separated by `\|`, `;`, `·` or line breaks |
 | `foto` | **Public image URL.** See the warning below |
 
-> **About `foto`:** WhatsApp fetches the image from Meta's servers, so the URL
-> has to return the image itself. A Google Drive share link returns an HTML
-> page instead and the photo silently fails to send. Use the URL of an image
-> already published on the agency's website, or any host that serves the file
-> directly. A row without a usable URL is not dropped — its details fall back
-> into the text message.
+> **About `foto`:** the URL has to return **the image file**, not a page that
+> displays it. Meta downloads it from its own servers, and the two look
+> identical when you paste them.
+>
+> The trap is that copying from the browser's address bar gives you the page.
+> On a stock photo site, right-click the image → *Copy image address*:
+>
+> | | |
+> |---|---|
+> | ❌ page | `https://unsplash.com/es/fotos/casa-RKdLlTyjm5g` |
+> | ✅ image | `https://images.unsplash.com/photo-1583608205776?w=1080&fm=jpg` |
+>
+> Known page URLs (Unsplash, Pexels, Pinterest, Google Photos…) are detected
+> and ignored, so the listing keeps appearing — just in the text message
+> instead of as a photo. Google Drive and Dropbox share links are converted
+> automatically to their direct-file form. Anything ignored is counted in the
+> execution log (*"N fotos ignoradas"*), because otherwise the failure is
+> invisible: Meta accepts the send, returns a message ID, and drops the message
+> afterwards without telling anyone.
 
 ## `negocio`
 

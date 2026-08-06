@@ -118,21 +118,31 @@ function parsearPropiedad(fila) {
 /**
  * Todas las filas de la pestaña "propiedades".
  *
- * @returns {{propiedades: Array, descartadas: number}} `descartadas` cuenta las
- *          filas sin código, para poder avisarlo en el log sin frenar nada.
+ * @returns {{propiedades: Array, descartadas: number, fotosDescartadas: number}}
+ *          Los dos contadores son para el log: `descartadas` son filas sin
+ *          código (la fila vacía del final, una fila de notas) y
+ *          `fotosDescartadas` son URLs que no devuelven una imagen. Ese
+ *          segundo caso no rompe nada, pero es invisible desde el chat y hay
+ *          que poder encontrarlo sin adivinar.
  */
 function parsearCatalogo(filas) {
   const lista = Array.isArray(filas) ? filas : [];
   const propiedades = [];
   let descartadas = 0;
+  let fotosDescartadas = 0;
 
   for (const fila of lista) {
     const propiedad = parsearPropiedad(fila);
-    if (propiedad) propiedades.push(propiedad);
-    else descartadas += 1;
+    if (!propiedad) {
+      descartadas += 1;
+      continue;
+    }
+    // La celda tenía algo y no sobrevivió: o no era una URL, o era una página.
+    if (!propiedad.foto && celdaTexto(valorDe(fila, COLUMNAS.foto))) fotosDescartadas += 1;
+    propiedades.push(propiedad);
   }
 
-  return { propiedades, descartadas };
+  return { propiedades, descartadas, fotosDescartadas };
 }
 
 module.exports = {

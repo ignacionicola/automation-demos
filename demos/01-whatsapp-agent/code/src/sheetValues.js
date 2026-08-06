@@ -101,13 +101,64 @@ function celdaLista(valor) {
     .filter(Boolean);
 }
 
+// Páginas que MUESTRAN una imagen pero no la sirven. Es lo que copia cualquiera
+// de la barra de direcciones, y no se puede distinguir mirando la URL: tiene
+// forma perfecta de link.
+//
+// Importa más de lo que parece. Meta descarga la imagen desde su servidor: si
+// recibe HTML en vez de bytes, igual acepta el envío y devuelve un ID de
+// mensaje, y recién después lo descarta en silencio. Nadie se entera — ni el
+// cliente, ni la inmobiliaria, ni el log. Y como la propiedad se fue por la
+// rama de fotos, tampoco aparece en el texto: desaparece del chat entera.
+//
+// Por eso se descartan acá: sin foto, la ficha vuelve al mensaje de texto y la
+// propiedad se ve igual. Una foto de menos es mucho mejor que una propiedad
+// que el cliente nunca supo que existía.
+const PAGINAS_QUE_NO_SIRVEN_LA_IMAGEN = [
+  /^https?:\/\/(www\.)?unsplash\.com\//i,
+  /^https?:\/\/(www\.)?pexels\.com\//i,
+  /^https?:\/\/(www\.)?pixabay\.com\//i,
+  /^https?:\/\/(www\.)?flickr\.com\//i,
+  // Pinterest sirve las imágenes desde otro dominio (pinimg.com), así que acá
+  // se puede descartar cualquier subdominio. Unsplash y Pexels no: sus CDN son
+  // images.unsplash.com e images.pexels.com, que sí hay que dejar pasar.
+  /^https?:\/\/[\w-]*\.?pinterest\.[a-z.]+\//i,
+  /^https?:\/\/photos\.google\.com\//i,
+  /^https?:\/\/(www\.)?icloud\.com\//i,
+];
+
+// Estas dos sí se pueden arreglar solas, y son las que una inmobiliaria va a
+// usar de verdad: el link que copia del botón "Compartir" apunta a la página,
+// pero el archivo está a un parámetro de distancia.
+const REPARABLES = [
+  {
+    reconoce: /^https?:\/\/drive\.google\.com\/file\/d\/([^/?#]+)/i,
+    arregla: (m) => `https://drive.google.com/uc?export=view&id=${m[1]}`,
+  },
+  {
+    reconoce: /^(https?:\/\/(?:www\.)?dropbox\.com\/[^?#]+)/i,
+    arregla: (m) => `${m[1]}?raw=1`,
+  },
+];
+
 /**
- * URL de una celda, o null. Solo http(s): una celda con "ver carpeta" o una
- * ruta local no sirve para que Meta descargue la imagen desde su servidor.
+ * URL de imagen de una celda, o null.
+ *
+ * Devuelve null tanto si no es una URL ("ver carpeta", una ruta local) como si
+ * es una URL que no va a devolver una imagen. Quien llama trata los dos casos
+ * igual: la propiedad no tiene foto.
  */
 function celdaUrl(valor) {
   const texto = celdaTexto(valor);
   if (!/^https?:\/\/\S+$/i.test(texto)) return null;
+
+  for (const { reconoce, arregla } of REPARABLES) {
+    const encontrado = texto.match(reconoce);
+    if (encontrado) return arregla(encontrado);
+  }
+
+  if (PAGINAS_QUE_NO_SIRVEN_LA_IMAGEN.some((patron) => patron.test(texto))) return null;
+
   return texto;
 }
 

@@ -47,7 +47,7 @@ function construirConfig(leido, respaldo) {
   const crudo = leido || {};
   const local = respaldo || {};
 
-  const { propiedades, descartadas } = parsearCatalogo(crudo.propiedades);
+  const { propiedades, descartadas, fotosDescartadas } = parsearCatalogo(crudo.propiedades);
   const faq = parsearFaq(crudo.faq);
 
   const hayPropiedades = propiedades.length > 0;
@@ -65,6 +65,7 @@ function construirConfig(leido, respaldo) {
       // aportando lo que sí tenga.
       negocio: Array.isArray(crudo.negocio) && crudo.negocio.length ? ORIGEN_PLANILLA : ORIGEN_RESPALDO,
       filasDescartadas: descartadas,
+      fotosDescartadas,
     },
   };
 }
@@ -81,6 +82,7 @@ function configDeRespaldo(respaldo) {
       faq: ORIGEN_RESPALDO,
       negocio: ORIGEN_RESPALDO,
       filasDescartadas: 0,
+      fotosDescartadas: 0,
     },
   };
 }
@@ -94,6 +96,9 @@ function describirOrigen(config) {
     `negocio: ${origen.negocio || '?'}`,
   ];
   if (origen.filasDescartadas) partes.push(`${origen.filasDescartadas} filas sin código`);
+  if (origen.fotosDescartadas) {
+    partes.push(`${origen.fotosDescartadas} fotos ignoradas (la URL no devuelve una imagen)`);
+  }
   return partes.join(' · ');
 }
 

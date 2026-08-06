@@ -96,6 +96,27 @@ test('sin código la fila se descarta y se cuenta', () => {
   assert.strictEqual(descartadas, 2);
 });
 
+test('una propiedad con la foto mal cargada sigue apareciendo', () => {
+  // El bug que arregla: la URL de una página de Unsplash pasaba el filtro, la
+  // propiedad se iba por la rama de fotos, Meta descartaba el mensaje y la
+  // propiedad no aparecía por ningún lado. Sin foto vuelve al texto, que es
+  // muchísimo mejor que desaparecer.
+  const { propiedades, fotosDescartadas } = parsearCatalogo([
+    { ...FILA, id: 'INM-1', foto: 'https://unsplash.com/es/fotos/una-casa-linda-RKdLlTyjm5g' },
+    { ...FILA, id: 'INM-2', foto: 'https://ejemplo.com/real.jpg' },
+    { ...FILA, id: 'INM-3', foto: '' },
+  ]);
+
+  assert.strictEqual(propiedades.length, 3, 'ninguna se pierde');
+  assert.strictEqual(propiedades[0].foto, null, 'la página se descarta');
+  assert.strictEqual(propiedades[1].foto, 'https://ejemplo.com/real.jpg');
+  assert.strictEqual(
+    fotosDescartadas,
+    1,
+    'solo cuenta la que traía algo cargado, no la celda vacía',
+  );
+});
+
 test('una operación o un tipo desconocidos quedan en null, no inventados', () => {
   // Un valor inventado dejaría la propiedad fuera de toda búsqueda sin que
   // nadie entienda por qué; en null, simplemente no filtra por eso.

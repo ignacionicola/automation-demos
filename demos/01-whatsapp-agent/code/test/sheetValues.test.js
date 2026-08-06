@@ -61,10 +61,48 @@ test('las listas aceptan cualquier separador razonable', () => {
 
 test('solo se acepta una URL que Meta pueda descargar', () => {
   assert.strictEqual(celdaUrl('https://ejemplo.com/foto.jpg'), 'https://ejemplo.com/foto.jpg');
+  // Sin extensión también vale: los CDN sirven imágenes así todo el tiempo.
+  assert.strictEqual(
+    celdaUrl('https://images.unsplash.com/photo-1583608205776?w=1080&fm=jpg'),
+    'https://images.unsplash.com/photo-1583608205776?w=1080&fm=jpg',
+  );
   // Meta baja la imagen desde su servidor: una nota o una ruta local no sirven.
   for (const invalida of ['ver carpeta', 'C:\\fotos\\1.jpg', 'foto.jpg', '', null]) {
     assert.strictEqual(celdaUrl(invalida), null, `${JSON.stringify(invalida)} no es una URL usable`);
   }
+});
+
+test('una página que muestra la foto no es la foto', () => {
+  // Pasó de verdad: se cargó la URL de la barra de direcciones de Unsplash.
+  // Meta acepta el envío, devuelve un ID de mensaje, y después descarta el
+  // mensaje en silencio al recibir HTML. La propiedad desaparecía del chat
+  // entera, porque tampoco salía en el texto.
+  const paginas = [
+    'https://unsplash.com/es/fotos/casa-de-hormigon-iluminado-blanco-y-negro-RKdLlTyjm5g',
+    'https://www.pexels.com/photo/white-concrete-house-1029599/',
+    'https://pixabay.com/photos/house-architecture-1836070/',
+    'https://www.flickr.com/photos/alguien/52847391234/',
+    'https://ar.pinterest.com/pin/1234567890/',
+    'https://photos.google.com/share/AF1Qxyz',
+  ];
+
+  for (const pagina of paginas) {
+    assert.strictEqual(celdaUrl(pagina), null, `${pagina} devuelve HTML, no una imagen`);
+  }
+});
+
+test('los links de Drive y Dropbox se arreglan solos', () => {
+  // Es donde una inmobiliaria va a poner sus fotos, y el botón "Compartir" da
+  // el link a la página. Rechazarlos sería correcto pero inútil: se pueden
+  // convertir en el link al archivo.
+  assert.strictEqual(
+    celdaUrl('https://drive.google.com/file/d/1AbC_dEf-123/view?usp=sharing'),
+    'https://drive.google.com/uc?export=view&id=1AbC_dEf-123',
+  );
+  assert.strictEqual(
+    celdaUrl('https://www.dropbox.com/s/abc123/casa.jpg?dl=0'),
+    'https://www.dropbox.com/s/abc123/casa.jpg?raw=1',
+  );
 });
 
 test('celdaTexto no propaga null ni undefined al mensaje', () => {
