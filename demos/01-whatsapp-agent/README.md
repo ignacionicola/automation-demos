@@ -497,7 +497,7 @@ Copy `.env.example` to `.env` and set the values on your n8n instance:
 | Variable | Purpose | Example |
 |---|---|---|
 | `WHATSAPP_PHONE_NUMBER_ID` | Sender's Phone Number ID from API Setup (not the phone number itself) | `123456789012345` |
-| `OWNER_WHATSAPP_NUMBER` | Where handoff alerts go — must be added as a tester number while the app is in development mode. Write it **exactly** as it appears in Meta's recipient list — it is sent unchanged, and `549…` / `54…` are two different entries there. See the `131030` entry under [Troubleshooting](#troubleshooting) | `+5493519876543` |
+| `OWNER_WHATSAPP_NUMBER` | Where handoff alerts go — must be added as a tester number while the app is in development mode. Any format works (`+54 9 …`, `549…`, `54…`): `Normalize Inbound Message` reformats it for the API — see the `131030` entry under [Troubleshooting](#troubleshooting) | `+5493519876543` |
 | `LLM_PROVIDER` | Which LLM to call: `gemini` (default), `anthropic` or `groq` | `gemini` |
 | `LLM_MODEL` | Optional. Empty = provider's default model | `gemini-flash-latest` |
 | `LLM_API_URL` | Optional. Overrides the provider's default endpoint entirely | *(leave empty)* |
@@ -719,24 +719,21 @@ provider's real message in the error's **`description`**, not `message`
 (`message` is n8n's own generic "Bad request - please check your parameters"),
 so open the node's error output rather than trusting the summary line.
 
-- **`(#131030) Recipient phone number not in allowed list`** — while the app
-  is in development mode, the recipient list is matched **literally**. For an
-  Argentine mobile, `543571684980` and `5493571684980` are two separate
-  entries in it, and only the one actually registered works.
-
-  Worth spelling out, because the obvious diagnosis is wrong and reproducible.
-  Sending with the mobile `9` failed and sending without it worked — against
-  the live API, both forms of the same number — which reads exactly like "the
-  Cloud API rejects the Argentine 9". It doesn't: that number simply happened
-  to be registered without the 9. A second phone, registered only *with* it,
-  broke both directions at once — the agent could neither reply to the
-  customer nor alert the owner, both with this same error.
-
-  So nothing is reformatted: the reply goes to the `wa_id` exactly as the
-  webhook delivered it, and the owner's number exactly as configured. If you
-  hit this, check which form is in **WhatsApp → API Setup → To → Manage phone
-  number list** and match it. In production that list doesn't exist and the
-  `wa_id` always works.
+- **`(#131030) Recipient phone number not in allowed list`** — the error is
+  misleading: it fires both when the number genuinely isn't on the allowed
+  list *and* when it is, but you sent it in a format Meta doesn't match
+  against that list. The second case is what bit us with an Argentine mobile.
+  Meta's webhook hands you the `wa_id` **with** the mobile `9`
+  (`549XXXXXXXXXX`), but `POST /{phone-number-id}/messages` only accepts it
+  **without** the `9` (`54XXXXXXXXXX`) — send back the exact `wa_id` you just
+  received and it gets rejected. `Normalize Inbound Message` handles this via
+  `toWhatsAppRecipient()` (see `code/src/phoneNumbers.js`), which is why the
+  outbound nodes read `telefonoClienteParaEnvio` / `telefonoDuenoParaEnvio`
+  instead of the E.164 `telefonoCliente` used for logging. Confirmed against
+  the live API: sending to `543511234567` delivers, and the status webhook
+  comes back with `recipient_id: "5493511234567"` — Meta normalises it back on
+  its own. If you hit this for a country other than Argentina, add its mobile
+  prefix to `PREFIJO_MOVIL_POR_PAIS`.
 - Before assuming it's a format problem, rule out the plain case: while the
   app is in development mode the recipient must be added **and verified** (via
   the code Meta sends over WhatsApp) under **WhatsApp → API Setup**.
@@ -762,7 +759,7 @@ code/
 │   ├── scheduling.js           visit validation, records and replies
 │   ├── llmProviders.js         per-provider request building + response parsing
 │   ├── parseClassification.js  validates the model's output, provider-agnostic
-│   ├── phoneNumbers.js         recipient digits for the Cloud API, unmodified
+│   ├── phoneNumbers.js         recipient formatting for the Cloud API
 │   ├── llmFailureReason.js     turns a failed LLM call into a readable reason
 │   ├── conversationMemory.js   per-phone history and entity accumulation
 │   ├── voiceNotes.js           voice-note detection and provider capability
@@ -772,7 +769,7 @@ code/
 │   ├── sheetCatalog.js         spreadsheet rows -> catalogue entries
 │   ├── businessConfig.js       the negocio/faq tabs, hours and {{placeholders}}
 │   └── catalogSource.js        cache, and the fallback to the bundled JSON
-├── test/                       300 tests, node:test, no dependencies
+├── test/                       304 tests, node:test, no dependencies
 └── scripts/
     ├── build-workflow.js       injects src/ into the workflow's Code nodes
     └── test.js                 runs the suite in the local timezone and in UTC
@@ -780,7 +777,7 @@ code/
 
 ```bash
 cd code
-npm test                  # 300 tests, run twice: local timezone and UTC
+npm test                  # 304 tests, run twice: local timezone and UTC
 npm run test:once         # a single pass, in the local timezone
 npm run build:workflow    # regenerate workflow.json from src/
 npm run check:workflow    # fail if the committed workflow.json is stale
