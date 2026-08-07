@@ -139,6 +139,31 @@ flowchart TD
   deterministic and testable — a newly supplied value overrides the stored one,
   an absent one leaves it standing. See
   [why it uses a data table](#why-a-data-table-and-not-workflow-static-data).
+- **Accumulated filters are released when the search changes.** Carrying
+  criteria between messages is what makes *"busco depto en Nueva Córdoba"* +
+  *"algo de un dormitorio"* one request instead of two, but left unbounded it
+  answers the wrong question: a `tipo: casa` from two messages earlier
+  discarded the only 8-bedroom listing in the catalogue — filed as an
+  apartment — and the agent said it had nothing while holding an exact match.
+  The classifier now flags whether a message *refines* the previous search or
+  *starts a new one*, and only the search criteria are dropped: the email and
+  the pending viewing survive, since changing the subject shouldn't make the
+  customer repeat them.
+- **A property can be asked for by name.** Agencies name their listings, and
+  customers ask for them that way — *"la casa de Messi tenés?"*. That used to
+  return two unrelated houses, because the name went nowhere and the stale
+  filters decided the answer. A named request now matches against title,
+  description, address and neighbourhood, and **overrides every other filter**:
+  the customer asked for that one, not for something similar. The name applies
+  to the message it appears in and is never inherited, or every later search
+  would still be filtering by it.
+- **"Mostrame las otras" shows the other ones.** The reply says *"tengo 4, te
+  muestro las 3 más afines"*, so asking for the fourth is the obvious next
+  move — and it used to repeat the same three. The listings already shown are
+  in memory (kept for resolving *"el de Las Flores"*), so they are excluded on
+  request. Exclusion happens after filtering, which keeps *"I have nothing like
+  that"* distinct from *"you've seen everything I have like that"* — two very
+  different answers for someone who is still looking.
 - **Memory also records what the agent showed, not just what the customer
   said.** *"Me interesa el de Las Flores"* is the natural way to pick one of
   three listings, and it is unresolvable from the customer's messages alone —
@@ -740,7 +765,7 @@ code/
 │   ├── sheetCatalog.js         spreadsheet rows -> catalogue entries
 │   ├── businessConfig.js       the negocio/faq tabs, hours and {{placeholders}}
 │   └── catalogSource.js        cache, and the fallback to the bundled JSON
-├── test/                       289 tests, node:test, no dependencies
+├── test/                       297 tests, node:test, no dependencies
 └── scripts/
     ├── build-workflow.js       injects src/ into the workflow's Code nodes
     └── test.js                 runs the suite in the local timezone and in UTC
@@ -748,7 +773,7 @@ code/
 
 ```bash
 cd code
-npm test                  # 289 tests, run twice: local timezone and UTC
+npm test                  # 297 tests, run twice: local timezone and UTC
 npm run test:once         # a single pass, in the local timezone
 npm run build:workflow    # regenerate workflow.json from src/
 npm run check:workflow    # fail if the committed workflow.json is stale

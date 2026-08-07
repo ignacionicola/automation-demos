@@ -71,6 +71,13 @@ function esquemaClasificacionGemini() {
       // el cliente, en texto. Va en la misma respuesta que el intent para no
       // pagar dos llamadas (una para transcribir y otra para clasificar).
       transcripcion: { type: 'STRING', nullable: true },
+      // Los criterios de búsqueda se acumulan entre mensajes para que "y de un
+      // dormitorio" refine el pedido anterior. Este flag es cómo el modelo
+      // avisa que el cliente arrancó una búsqueda distinta y hay que soltar
+      // los criterios viejos en vez de arrastrarlos.
+      reinicia_busqueda: { type: 'BOOLEAN', nullable: true },
+      // El cliente pide ver otras opciones además de las ya mostradas.
+      pide_mas_opciones: { type: 'BOOLEAN', nullable: true },
       entidades: {
         type: 'OBJECT',
         properties: {
@@ -86,6 +93,10 @@ function esquemaClasificacionGemini() {
           hora_visita: campoStringOpcional(),
           email: campoStringOpcional(),
           referencia_propiedad: campoStringOpcional(),
+          // El nombre con el que el cliente pide una propiedad puntual ("la
+          // casa de Messi"). Se busca contra el título y la descripción, y
+          // manda por encima del resto de los filtros.
+          busqueda_libre: campoStringOpcional(),
         },
         propertyOrdering: [
           'operacion',
@@ -100,13 +111,21 @@ function esquemaClasificacionGemini() {
           'hora_visita',
           'email',
           'referencia_propiedad',
+          'busqueda_libre',
         ],
       },
     },
     // "transcripcion" queda fuera de required: en los mensajes de texto no
     // aplica, y obligarla haría que el modelo invente algo para llenarla.
     required: ['intent', 'confianza', 'entidades'],
-    propertyOrdering: ['intent', 'confianza', 'transcripcion', 'entidades'],
+    propertyOrdering: [
+      'intent',
+      'confianza',
+      'transcripcion',
+      'reinicia_busqueda',
+      'pide_mas_opciones',
+      'entidades',
+    ],
   };
 }
 

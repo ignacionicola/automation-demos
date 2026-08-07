@@ -56,7 +56,57 @@ function presupuestoEnPesos(criterios) {
   return aPesos(monto, criterios.moneda === 'USD' ? 'USD' : 'ARS');
 }
 
+/**
+ * Todo el texto de una propiedad en el que tiene sentido buscar por nombre.
+ *
+ * Las inmobiliarias bautizan las propiedades ("la casa del molino", "el dúplex
+ * de la esquina") y el cliente pregunta por ese nombre, no por metros
+ * cuadrados. Sin esto, "la casa de Messi tenés?" no encuentra la propiedad
+ * titulada exactamente así.
+ */
+function textoBuscable(propiedad) {
+  const destacados = Array.isArray(propiedad.destacados) ? propiedad.destacados.join(' ') : '';
+  return normalizarTexto(
+    [propiedad.id, propiedad.titulo, propiedad.descripcion, propiedad.barrio, propiedad.direccion, destacados]
+      .filter(Boolean)
+      .join(' '),
+  );
+}
+
+// Palabras que aparecen en cualquier consulta y no distinguen una propiedad de
+// otra: si "casa" contara, "la casa de Messi" matchearía con todas las casas.
+const PALABRAS_SIN_VALOR = new Set([
+  'casa', 'departamento', 'depto', 'ph', 'local', 'propiedad', 'inmueble',
+  'alquiler', 'venta', 'alquilar', 'comprar', 'tenes', 'tienen', 'hay',
+  'una', 'uno', 'del', 'los', 'las', 'con', 'para', 'por', 'que', 'the',
+]);
+
+/**
+ * ¿La propiedad responde a lo que el cliente nombró?
+ *
+ * Alcanza con que aparezca una palabra con contenido: el cliente escribe "la
+ * casa de Messi" y el título es "Casa de Messi", así que exigir la frase
+ * entera fallaría por cualquier artículo de más.
+ */
+function coincideConTexto(propiedad, texto) {
+  const palabras = normalizarTexto(texto)
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((palabra) => palabra.length > 2 && !PALABRAS_SIN_VALOR.has(palabra));
+
+  if (palabras.length === 0) return true;
+
+  const buscable = textoBuscable(propiedad);
+  return palabras.some((palabra) => buscable.includes(palabra));
+}
+
 function cumpleFiltros(propiedad, criterios, nivel) {
+  // Cuando el cliente nombra una propiedad, ese nombre manda: es lo único que
+  // pidió, y arrastrarle los filtros de la búsqueda anterior es lo que hacía
+  // que "la casa de Messi" devolviera dos casas cualquiera.
+  if (criterios.busqueda_libre) {
+    return coincideConTexto(propiedad, criterios.busqueda_libre);
+  }
   if (criterios.operacion && normalizarTexto(propiedad.operacion) !== normalizarTexto(criterios.operacion)) {
     return false;
   }
@@ -124,28 +174,51 @@ function puntuar(propiedad, criterios) {
 }
 
 /**
- * @param {object} criterios  { operacion, tipo, ciudad, barrio, dormitorios, banios, presupuesto, moneda }
+ * @param {object} criterios  { operacion, tipo, ciudad, barrio, dormitorios,
+ *                              banios, presupuesto, moneda, busqueda_libre }
  * @param {Array}  propiedades catálogo completo
- * @returns {{resultados: Array, nivel: string, total: number}}
+ * @param {object} [opciones]  { excluir: string[] } ids ya mostrados, para
+ *                             cuando el cliente pide ver las otras
+ * @returns {{resultados, nivel, total, totalSinExcluir, agotadas}}
  */
-function matchProperties(criterios, propiedades) {
+function matchProperties(criterios, propiedades, opciones) {
   const filtros = criterios && typeof criterios === 'object' ? criterios : {};
   const catalogo = Array.isArray(propiedades) ? propiedades : [];
+  const excluir = new Set(((opciones || {}).excluir || []).map((id) => normalizarTexto(id)));
 
   for (const nivel of NIVELES_DE_BUSQUEDA) {
     const encontradas = catalogo.filter((propiedad) => cumpleFiltros(propiedad, filtros, nivel));
     if (encontradas.length === 0) continue;
 
-    const ordenadas = encontradas
+    // Las ya mostradas se sacan recién acá, después de filtrar: así se puede
+    // distinguir "no hay nada que encaje" de "ya te mostré todo lo que hay",
+    // que para el cliente son dos respuestas muy distintas.
+    const nuevas = encontradas.filter((propiedad) => !excluir.has(normalizarTexto(propiedad.id)));
+
+    const ordenadas = nuevas
       .map((propiedad) => ({ ...propiedad, puntaje: puntuar(propiedad, filtros) }))
       // Desempate por id para que el resultado sea determinístico.
       .sort((a, b) => b.puntaje - a.puntaje || a.id.localeCompare(b.id))
       .slice(0, MAX_RESULTADOS);
 
-    return { resultados: ordenadas, nivel: nivel.etiqueta, total: encontradas.length };
+    return {
+      resultados: ordenadas,
+      nivel: nivel.etiqueta,
+      total: nuevas.length,
+      totalSinExcluir: encontradas.length,
+      agotadas: nuevas.length === 0 && excluir.size > 0,
+    };
   }
 
-  return { resultados: [], nivel: 'sin_resultados', total: 0 };
+  return { resultados: [], nivel: 'sin_resultados', total: 0, totalSinExcluir: 0, agotadas: false };
 }
 
-module.exports = { matchProperties, normalizarTexto, normalizarBarrio, aPesos, USD_TO_ARS, MAX_RESULTADOS };
+module.exports = {
+  matchProperties,
+  coincideConTexto,
+  normalizarTexto,
+  normalizarBarrio,
+  aPesos,
+  USD_TO_ARS,
+  MAX_RESULTADOS,
+};

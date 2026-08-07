@@ -76,6 +76,12 @@ function parseClassification(opciones) {
     confianza,
     entidades: (parseado && parseado.entidades) || {},
     transcripcion,
+    // Señales sobre la búsqueda, no sobre el mensaje: si el cliente cambió de
+    // pedido (y hay que soltar los criterios acumulados) y si está pidiendo
+    // ver más opciones de las que ya se le mostraron. Se leen como booleanos
+    // estrictos porque un modelo puede devolver null u omitirlos.
+    reiniciaBusqueda: Boolean(parseado && parseado.reinicia_busqueda),
+    pideMasOpciones: Boolean(parseado && parseado.pide_mas_opciones),
     motivoDerivacion,
     textoCrudo,
   };

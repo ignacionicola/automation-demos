@@ -68,19 +68,62 @@ function esVacio(valor) {
   return valor === null || valor === undefined || valor === '';
 }
 
+// Los criterios de una búsqueda de propiedades. Acumularlos es lo que hace que
+// "busco depto en Nueva Córdoba" + "de un dormitorio" funcione como un solo
+// pedido; el problema es cuando el cliente cambia de tema y los arrastra.
+//
+// El caso que lo destapó: pidió "una casa más grande", después "algo de 8
+// dormitorios", y el `tipo: casa` de dos mensajes antes descartó la única
+// propiedad de 8 dormitorios del catálogo, que estaba cargada como
+// departamento. El agente contestó que no tenía nada teniendo la coincidencia
+// exacta.
+// Entidades que valen solo para el mensaje en que aparecen y nunca se heredan.
+const ENTIDADES_DEL_MOMENTO = ['busqueda_libre'];
+
+const ENTIDADES_DE_BUSQUEDA = [
+  'operacion',
+  'tipo',
+  'ciudad',
+  'barrio',
+  'dormitorios',
+  'banios',
+  'presupuesto',
+  'moneda',
+];
+
 /**
  * Fusiona lo que el cliente ya había dicho con lo que dice ahora. Un valor
  * nuevo pisa al anterior (el cliente cambió de idea); un valor ausente deja
  * en pie el anterior (el cliente no lo repitió, pero sigue valiendo).
+ *
+ * @param {object} [opciones] `{ reiniciarBusqueda: true }` descarta los
+ *        criterios anteriores en vez de arrastrarlos. Lo decide el
+ *        clasificador, que es quien puede distinguir "y de un dormitorio"
+ *        (refina) de "la casa de Messi tenés?" (empieza de nuevo).
  */
-function combinarEntidades(previas, nuevas) {
+function combinarEntidades(previas, nuevas, opciones) {
   const anteriores = previas || {};
   const actuales = nuevas || {};
+  const reiniciar = Boolean((opciones || {}).reiniciarBusqueda);
   const resultado = {};
+
+  // Nombrar una propiedad vale para ese mensaje y nada más. Si se acumulara,
+  // el cliente pregunta "la casa de Messi tenés?" y las tres búsquedas
+  // siguientes seguirían filtrando por ese nombre.
+  for (const clave of ENTIDADES_DEL_MOMENTO) {
+    resultado[clave] = esVacio(actuales[clave]) ? null : actuales[clave];
+  }
 
   for (const clave of ENTIDADES_ACUMULABLES) {
     const valorNuevo = actuales[clave];
-    resultado[clave] = esVacio(valorNuevo) ? anteriores[clave] ?? null : valorNuevo;
+    if (!esVacio(valorNuevo)) {
+      resultado[clave] = valorNuevo;
+      continue;
+    }
+    // Sin valor nuevo: se hereda el anterior, salvo que esto sea una búsqueda
+    // nueva y la clave sea un criterio de búsqueda.
+    const heredable = !(reiniciar && ENTIDADES_DE_BUSQUEDA.includes(clave));
+    resultado[clave] = heredable ? anteriores[clave] ?? null : null;
   }
 
   return resultado;
@@ -233,7 +276,7 @@ function reemplazarUltimoMensaje(conversacion, texto) {
  * Fusiona las entidades que extrajo el clasificador. Se llama después de
  * clasificar, con la conversación ya actualizada por agregarMensaje.
  */
-function fusionarEntidades(conversacion, entidades, ahora) {
+function fusionarEntidades(conversacion, entidades, ahora, opciones) {
   const base = conversacion || CONVERSACION_VACIA;
 
   // El spread no es cosmético: sin él este return arma un objeto nuevo con
@@ -243,7 +286,7 @@ function fusionarEntidades(conversacion, entidades, ahora) {
   return {
     ...base,
     mensajes: Array.isArray(base.mensajes) ? base.mensajes : [],
-    entidades: combinarEntidades(base.entidades, entidades),
+    entidades: combinarEntidades(base.entidades, entidades, opciones),
     actualizadoEn: ahora || base.actualizadoEn,
   };
 }
@@ -318,6 +361,8 @@ module.exports = {
   olvidarVisita,
   recordarPropiedadesMostradas,
   ENTIDADES_DE_LA_VISITA,
+  ENTIDADES_DE_BUSQUEDA,
+  ENTIDADES_DEL_MOMENTO,
   reemplazarUltimoMensaje,
   fusionarEntidades,
   formatearContexto,

@@ -152,6 +152,18 @@ function formatPropertyReply(match, contexto) {
   const resultados = (match && match.resultados) || [];
 
   if (resultados.length === 0) {
+    // No es lo mismo "no tengo nada así" que "ya te mostré todo lo que tengo
+    // así". Con la segunda, el cliente que pidió ver más opciones merece
+    // saber que las vio todas, no que su búsqueda no dio resultados.
+    if (match && match.agotadas) {
+      const cuantas = match.totalSinExcluir;
+      return [
+        `Esas son todas las que tengo con esas características${cuantas ? ` (${cuantas} en total)` : ''} 🙈`,
+        '',
+        '¿Ampliamos la búsqueda —otro barrio, otro rango de precio— o te paso con un asesor?',
+      ].join('\n');
+    }
+
     const ciudad = capitalizarBarrio(criterios && criterios.ciudad);
     // La ciudad nunca se relaja, así que si no hubo nada y el cliente nombró
     // una, lo más probable es que sea eso — conviene decirlo en vez de dejarlo

@@ -315,3 +315,52 @@ test('reemplazar no rompe si no hay nada que reemplazar', () => {
   const original = agregarMensaje(null, { mensaje: '(nota de voz)' }, AHORA);
   assert.strictEqual(reemplazarUltimoMensaje(original, '').mensajes[0].texto, '(nota de voz)');
 });
+
+test('una búsqueda nueva suelta los criterios de la anterior', () => {
+  // El bug que arregla: "3 dormitorios" y "tipo casa" quedaban pegados, y
+  // cuando el cliente preguntó por algo de 8 dormitorios el `tipo: casa` viejo
+  // descartó la única propiedad que encajaba —cargada como departamento— y el
+  // agente contestó que no tenía nada.
+  const previas = { ciudad: 'Río Tercero', tipo: 'casa', dormitorios: 3, banios: 2, barrio: 'Alberdi' };
+
+  const refinando = combinarEntidades(previas, { dormitorios: 8 });
+  assert.strictEqual(refinando.tipo, 'casa', 'refinar mantiene lo anterior');
+  assert.strictEqual(refinando.dormitorios, 8);
+
+  const nueva = combinarEntidades(previas, { dormitorios: 8 }, { reiniciarBusqueda: true });
+  assert.strictEqual(nueva.dormitorios, 8, 'lo que dijo ahora vale');
+  assert.strictEqual(nueva.tipo, null, 'lo que no repitió, se suelta');
+  assert.strictEqual(nueva.barrio, null);
+  assert.strictEqual(nueva.ciudad, null);
+});
+
+test('reiniciar la búsqueda no borra los datos de la persona', () => {
+  // El mail y la visita no son criterios de búsqueda: perderlos obligaría al
+  // cliente a repetirlos por haber cambiado de tema.
+  const previas = {
+    tipo: 'casa',
+    email: 'lucia@example.com',
+    fecha_visita: '2026-08-10',
+    hora_visita: '10:00',
+    referencia_propiedad: 'INM-101',
+  };
+
+  const nueva = combinarEntidades(previas, {}, { reiniciarBusqueda: true });
+
+  assert.strictEqual(nueva.tipo, null);
+  assert.strictEqual(nueva.email, 'lucia@example.com');
+  assert.strictEqual(nueva.fecha_visita, '2026-08-10');
+  assert.strictEqual(nueva.referencia_propiedad, 'INM-101');
+});
+
+test('el nombre de una propiedad no se arrastra al mensaje siguiente', () => {
+  // Nombrar una propiedad vale para ese mensaje. Si se acumulara, después de
+  // "la casa de Messi tenés?" las búsquedas siguientes seguirían filtrando
+  // por ese nombre y no encontrarían nunca nada más.
+  const conNombre = combinarEntidades({ ciudad: 'Río Tercero' }, { busqueda_libre: 'la casa de Messi' });
+  assert.strictEqual(conNombre.busqueda_libre, 'la casa de Messi');
+
+  const siguiente = combinarEntidades(conNombre, { dormitorios: 2 });
+  assert.strictEqual(siguiente.busqueda_libre, null, 'no se hereda');
+  assert.strictEqual(siguiente.ciudad, 'Río Tercero', 'el resto sí');
+});

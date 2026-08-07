@@ -460,3 +460,77 @@ test('todas las propiedades del catálogo tienen foto', () => {
   const fotos = propiedades.map((p) => p.foto);
   assert.strictEqual(new Set(fotos).size, fotos.length, 'no debería haber fotos repetidas');
 });
+
+// ---------------------------------------------------------------------------
+// Búsqueda por nombre, y "mostrame las otras"
+// ---------------------------------------------------------------------------
+
+/** Un catálogo chico con una propiedad de nombre propio, como las cargan las agencias. */
+const CATALOGO_CON_NOMBRE = [
+  { id: 'INM-800', titulo: 'Casa de Messi', tipo: 'departamento', ciudad: 'Río Tercero', barrio: 'Alto Alegre', dormitorios: 8, banios: 4, precio: 4000000, moneda: 'ARS', destacados: [] },
+  { id: 'INM-105', titulo: 'Casa con jardín', tipo: 'casa', ciudad: 'Río Tercero', barrio: 'Roque Sáenz Peña', dormitorios: 3, banios: 2, precio: 550000, moneda: 'ARS', destacados: ['Quincho'] },
+  { id: 'INM-102', titulo: 'Casa amplia en Alberdi', tipo: 'casa', ciudad: 'Río Tercero', barrio: 'Alberdi', dormitorios: 3, banios: 2, precio: 78000, moneda: 'USD', destacados: ['Parrilla'] },
+];
+
+test('se puede pedir una propiedad por su nombre', () => {
+  // El caso real: "la casa de Messi tenés?" devolvía dos casas cualquiera,
+  // porque el nombre no se usaba para nada y mandaban los filtros viejos.
+  const { resultados } = matchProperties({ busqueda_libre: 'la casa de Messi' }, CATALOGO_CON_NOMBRE);
+
+  assert.strictEqual(resultados.length, 1);
+  assert.strictEqual(resultados[0].id, 'INM-800');
+});
+
+test('el nombre pedido manda por encima de los filtros arrastrados', () => {
+  // INM-800 está cargada como departamento y tiene 8 dormitorios: con los
+  // criterios de la búsqueda anterior encima, quedaba descartada dos veces.
+  const { resultados } = matchProperties(
+    { busqueda_libre: 'casa de Messi', tipo: 'casa', dormitorios: 3, ciudad: 'Río Tercero' },
+    CATALOGO_CON_NOMBRE,
+  );
+
+  assert.deepStrictEqual(resultados.map((r) => r.id), ['INM-800']);
+});
+
+test('buscar por nombre no devuelve el catálogo entero', () => {
+  // "casa" está en el título de las tres: si contara como palabra de
+  // búsqueda, pedir una por nombre traería todas.
+  const { resultados } = matchProperties({ busqueda_libre: 'una casa' }, CATALOGO_CON_NOMBRE);
+
+  assert.strictEqual(resultados.length, 3, 'sin nada distintivo, no filtra');
+
+  const { resultados: alberdi } = matchProperties({ busqueda_libre: 'la de Alberdi' }, CATALOGO_CON_NOMBRE);
+  assert.deepStrictEqual(alberdi.map((r) => r.id), ['INM-102']);
+});
+
+test('"mostrame las otras" no repite las que ya vio', () => {
+  const primera = matchProperties({ ciudad: 'Río Tercero' }, CATALOGO_CON_NOMBRE);
+  assert.strictEqual(primera.resultados.length, 3);
+
+  const segunda = matchProperties({ ciudad: 'Río Tercero' }, CATALOGO_CON_NOMBRE, {
+    excluir: ['INM-800', 'INM-105'],
+  });
+
+  assert.deepStrictEqual(segunda.resultados.map((r) => r.id), ['INM-102']);
+  assert.strictEqual(segunda.totalSinExcluir, 3, 'el total real no cambia');
+});
+
+test('cuando ya vio todas, se distingue de no tener nada', () => {
+  // Para el cliente son dos respuestas muy distintas: "no tengo nada así" o
+  // "ya te mostré todo lo que tengo así".
+  const agotado = matchProperties({ ciudad: 'Río Tercero' }, CATALOGO_CON_NOMBRE, {
+    excluir: ['INM-800', 'INM-105', 'INM-102'],
+  });
+
+  assert.strictEqual(agotado.resultados.length, 0);
+  assert.strictEqual(agotado.agotadas, true);
+  assert.strictEqual(agotado.totalSinExcluir, 3);
+
+  const sinNada = matchProperties({ ciudad: 'Villa María' }, CATALOGO_CON_NOMBRE);
+  assert.strictEqual(sinNada.agotadas, false, 'esto sí es "no tengo nada"');
+
+  // Y el mensaje lo refleja.
+  const mensaje = formatPropertyReply(agotado, { agencia: 'Nicola', criterios: { ciudad: 'Río Tercero' } });
+  assert.match(mensaje, /todas las que tengo/i);
+  assert.ok(!/no encontré nada/i.test(mensaje));
+});
