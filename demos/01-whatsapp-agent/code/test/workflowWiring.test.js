@@ -277,6 +277,38 @@ test('los nodos que usan el catálogo lo leen de la config, no del JSON fijo', (
   assert.match(codigo('Resolve Slot'), /cierreDelDia\(cuando\.getDay\(\), negocio\)/);
 });
 
+test('el aviso al dueño no depende de la ventana de 24 hs de Meta', () => {
+  // Meta rechaza un mensaje libre a alguien que no escribió en las últimas 24
+  // horas, y el aviso de una derivación es justo cuando eso importa: hay un
+  // cliente esperando y el dueño puede no haber abierto el chat en todo el día.
+  const salidas = workflow.connections['Build Handoff Messages'].main[0].map((c) => c.node);
+
+  assert.ok(salidas.includes('Notify Owner (WhatsApp)'));
+  assert.ok(salidas.includes('Telegram Configured?'), 'tiene que haber un segundo canal');
+
+  // En paralelo, no en cadena: la respuesta al cliente no espera por Telegram.
+  assert.ok(
+    !workflow.connections['Telegram Configured?'].main.flat().some((c) => c.node === 'Format Handoff Reply'),
+    'el aviso por Telegram no puede estar en el camino de la respuesta al cliente',
+  );
+
+  const telegram = nodos.get('Notify Owner (Telegram)');
+  assert.match(telegram.parameters.url, /\$env\.TELEGRAM_BOT_TOKEN/);
+  assert.strictEqual(telegram.onError, 'continueRegularOutput', 'si falla, el cliente igual recibe respuesta');
+
+  // Sin configurar, no se manda nada ni se rompe: la rama falsa queda vacía.
+  assert.deepStrictEqual(workflow.connections['Telegram Configured?'].main[1], []);
+});
+
+test('el mensaje de derivación cuenta el horario de la planilla', () => {
+  // Estaba escrito a mano acá, así que la agencia cambiaba su horario en la
+  // planilla y este mensaje seguía diciendo el viejo.
+  const codigoHandoff = codigo('Build Handoff Messages');
+
+  assert.match(codigoHandoff, /describirHorarios/);
+  assert.ok(!/9 a 19|9 a 13/.test(codigoHandoff), 'el horario no puede estar hardcodeado');
+});
+
 test('un saludo no puede terminar en una reserva', () => {
   // Pasó de verdad: con una fecha y una propiedad todavía en memoria, un
   // "hola buenas" se clasificó como continuación y agendó una visita. El
@@ -411,4 +443,39 @@ test('el nodo de fotos manda imagen por link con pie de foto', () => {
   assert.match(envio.parameters.mediaLink, /\$json\.link/);
   assert.match(envio.parameters.additionalFields.mediaCaption, /\$json\.caption/);
   assert.strictEqual(envio.onError, 'continueRegularOutput', 'una foto rota no debe romper nada');
+});
+
+// ---------------------------------------------------------------------------
+// El workflow de alertas: si el agente se rompe, alguien tiene que enterarse
+// ---------------------------------------------------------------------------
+
+const errorWorkflow = require('../../error-workflow.json');
+
+test('hay un workflow de errores y arranca en el trigger correcto', () => {
+  // Sin esto, un fallo a las 3 AM es una línea en un log que nadie abre, y el
+  // cliente solo ve silencio.
+  const tipos = errorWorkflow.nodes.map((n) => n.type);
+
+  assert.ok(tipos.includes('n8n-nodes-base.errorTrigger'), 'necesita un Error Trigger');
+  assert.strictEqual(
+    errorWorkflow.connections['When the Agent Fails'].main[0][0].node,
+    'Describe the Failure',
+  );
+});
+
+test('la alerta dice qué nodo falló y por qué', () => {
+  // Un stack trace no sirve desde el teléfono: lo que decide si hay que
+  // levantarse a arreglarlo es qué se rompió y con qué mensaje.
+  const describir = errorWorkflow.nodes.find((n) => n.name === 'Describe the Failure').parameters.jsCode;
+
+  assert.match(describir, /lastNodeExecuted/);
+  assert.match(describir, /error\.message/);
+  assert.match(describir, /ejecucion\.url/, 'el link a la ejecución es lo primero que se abre');
+});
+
+test('sin Telegram configurado, el workflow de errores no rompe', () => {
+  const salidas = errorWorkflow.connections['Telegram Configured?'].main;
+
+  assert.strictEqual(salidas[0][0].node, 'Send Alert (Telegram)');
+  assert.deepStrictEqual(salidas[1], [], 'sin configurar, queda en el log y ya');
 });

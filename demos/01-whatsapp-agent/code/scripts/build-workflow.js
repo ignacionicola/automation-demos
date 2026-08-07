@@ -62,6 +62,12 @@ const BUNDLES = {
     datos: {},
     modulos: ['llmProviders.js', 'voiceNotes.js'],
   },
+  // describirHorarios: el mensaje de derivación le cuenta al cliente el
+  // horario de atención, y tiene que salir de la planilla como todos los demás.
+  'Build Handoff Messages': {
+    datos: {},
+    modulos: ['sheetValues.js', 'businessConfig.js'],
+  },
   'Build Fallback Classification': {
     datos: {},
     modulos: ['llmFailureReason.js'],

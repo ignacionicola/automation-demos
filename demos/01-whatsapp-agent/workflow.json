@@ -541,7 +541,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Arma los dos mensajes de la derivación: el aviso interno al dueño y la\n// respuesta que ve el cliente.\nconst item = $input.first().json;\nconst motivo = item.motivoDerivacion || 'El cliente pidió hablar con una persona';\n\n// Si mandó una nota de voz que no se llegó a transcribir (por ejemplo, porque\n// falló la llamada al modelo), conviene decirlo: el audio está en el chat y el\n// dueño puede escucharlo. Un \"(sin texto)\" haría pensar que no mandó nada.\nconst textoDelMensaje =\n  item.mensaje || (item.esAudio ? '(nota de voz — escuchala en el chat)' : '(sin texto)');\n\nconst mensajeDueno = [\n  '🔔 *Consulta para atender*',\n  '',\n  'Cliente: ' + item.nombreCliente + ' (' + item.telefonoCliente + ')',\n  'Motivo: ' + motivo,\n  '',\n  'Mensaje: \"' + textoDelMensaje + '\"',\n  '',\n  'Respondele directo a ese número por WhatsApp.',\n].join('\\n');\n\nconst respuesta = [\n  'Dale, esto lo ve mejor una persona del equipo 🙌',\n  '',\n  'Ya le pasé tu consulta a un asesor de ' + item.agencia + '. Te escriben por acá dentro del horario de atención (lunes a viernes de 9 a 19 hs, sábados de 9 a 13 hs).',\n  '',\n  'Si mientras tanto querés que busque propiedades o coordinemos una visita, decime nomás.',\n].join('\\n');\n\nreturn [{ json: { ...item, mensajeDueno, respuesta } }];"
+        "jsCode": "// <<< BEGIN GENERATED — generado por code/scripts/build-workflow.js, no editar a mano >>>\n\n// Lógica de src/sheetValues.js\n\n/**\n * Interpretación de celdas de Google Sheets.\n *\n * Existe porque una planilla no es una base de datos: todo llega como texto y\n * lo escribió una persona. El mismo precio puede venir como `420000`,\n * `420.000`, `$ 420.000` o `USD 52.000`; \"tiene cochera\" como `sí`, `SI`, `x`\n * o `TRUE`. Nada de eso es culpa de quien carga los datos — es lo que pasa\n * cuando el backend es una planilla, que es justamente lo que la hace usable\n * para una inmobiliaria.\n *\n * La regla es no romper nunca: una celda que no se entiende vale null, y quien\n * llama decide. Un precio ilegible no puede tirar abajo la búsqueda entera.\n *\n * Nombres con sufijo \"DeCelda\" a propósito: estas funciones se inyectan en los\n * mismos Code nodes que matchProperties.js y calendarEvent.js, que ya tienen\n * sus propios normalizadores. Ver build-workflow.js.\n */\n\n// Formato argentino: el punto separa miles y la coma decimales. Es al revés\n// que en JS, así que \"420.000\" parseado a la ligera da 420.\nconst SEPARADOR_MILES = /\\./g;\n\nconst VERDADEROS = new Set(['si', 'sí', 'yes', 'true', 'verdadero', 'x', '1', 'ok', 'tiene']);\nconst FALSOS = new Set(['no', 'false', 'falso', '0', '-', 'sin']);\n\n// Cualquiera de estos separa los ítems de una celda de lista. Se aceptan\n// varios porque nadie va a recordar cuál era el correcto.\nconst SEPARADORES_DE_LISTA = /[\\n|;·•]+/;\n\nfunction celdaTexto(valor) {\n  if (valor === null || valor === undefined) return '';\n  return String(valor).trim();\n}\n\n/**\n * Número de una celda, tolerando símbolos de moneda, espacios y separadores de\n * miles. Devuelve null si no hay nada numérico que rescatar — incluido el caso\n * de que alguien escriba \"dos\".\n */\nfunction celdaNumero(valor) {\n  if (typeof valor === 'number') return Number.isFinite(valor) ? valor : null;\n\n  const texto = celdaTexto(valor);\n  if (!texto) return null;\n\n  // Se toma el primer número que aparezca, en vez de borrar todo lo que no sea\n  // dígito: con eso último, \"75 m2\" daba 752 — el 2 de \"m2\" se pegaba al\n  // final y la propiedad pasaba a tener 752 metros cuadrados.\n  const encontrado = texto.match(/-?\\d[\\d.,]*/);\n  if (!encontrado) return null;\n\n  // Una coma o un punto colgando al final no son separadores de nada.\n  const limpio = encontrado[0].replace(/[.,]+$/, '');\n\n  const tieneComa = limpio.includes(',');\n  // Con coma, ella es el decimal y los puntos son miles. Sin coma, un punto\n  // podría ser cualquiera de las dos cosas: \"420.000\" son cuatrocientos veinte\n  // mil, no 420 con 0 decimales, así que se lo trata como miles.\n  const normalizado = tieneComa\n    ? limpio.replace(SEPARADOR_MILES, '').replace(',', '.')\n    : limpio.replace(SEPARADOR_MILES, '');\n\n  const numero = Number(normalizado);\n  return Number.isFinite(numero) ? numero : null;\n}\n\n/** Entero de una celda; null si no es un entero razonable. */\nfunction celdaEntero(valor) {\n  const numero = celdaNumero(valor);\n  if (numero === null) return null;\n  return Number.isInteger(numero) ? numero : Math.round(numero);\n}\n\n/**\n * Booleano de una celda. Una celda vacía es `false`, no null: \"no dice que\n * tenga cochera\" y \"dice que no tiene cochera\" dan lo mismo para una búsqueda.\n */\nfunction celdaBooleano(valor) {\n  if (typeof valor === 'boolean') return valor;\n\n  const texto = celdaTexto(valor).toLowerCase();\n  if (!texto) return false;\n  if (VERDADEROS.has(texto)) return true;\n  if (FALSOS.has(texto)) return false;\n\n  // Cualquier otro texto se interpreta como que algo hay: \"cochera cubierta\",\n  // \"2 cocheras\". Lo que no está es lo que se deja vacío.\n  return true;\n}\n\n/** Lista de una celda, separada por saltos de línea, |, ; o · */\nfunction celdaLista(valor) {\n  if (Array.isArray(valor)) return valor.map(celdaTexto).filter(Boolean);\n\n  const texto = celdaTexto(valor);\n  if (!texto) return [];\n\n  return texto\n    .split(SEPARADORES_DE_LISTA)\n    .map((parte) => parte.trim())\n    .filter(Boolean);\n}\n\n// Páginas que MUESTRAN una imagen pero no la sirven. Es lo que copia cualquiera\n// de la barra de direcciones, y no se puede distinguir mirando la URL: tiene\n// forma perfecta de link.\n//\n// Importa más de lo que parece. Meta descarga la imagen desde su servidor: si\n// recibe HTML en vez de bytes, igual acepta el envío y devuelve un ID de\n// mensaje, y recién después lo descarta en silencio. Nadie se entera — ni el\n// cliente, ni la inmobiliaria, ni el log. Y como la propiedad se fue por la\n// rama de fotos, tampoco aparece en el texto: desaparece del chat entera.\n//\n// Por eso se descartan acá: sin foto, la ficha vuelve al mensaje de texto y la\n// propiedad se ve igual. Una foto de menos es mucho mejor que una propiedad\n// que el cliente nunca supo que existía.\nconst PAGINAS_QUE_NO_SIRVEN_LA_IMAGEN = [\n  /^https?:\\/\\/(www\\.)?unsplash\\.com\\//i,\n  /^https?:\\/\\/(www\\.)?pexels\\.com\\//i,\n  /^https?:\\/\\/(www\\.)?pixabay\\.com\\//i,\n  /^https?:\\/\\/(www\\.)?flickr\\.com\\//i,\n  // Pinterest sirve las imágenes desde otro dominio (pinimg.com), así que acá\n  // se puede descartar cualquier subdominio. Unsplash y Pexels no: sus CDN son\n  // images.unsplash.com e images.pexels.com, que sí hay que dejar pasar.\n  /^https?:\\/\\/[\\w-]*\\.?pinterest\\.[a-z.]+\\//i,\n  /^https?:\\/\\/photos\\.google\\.com\\//i,\n  /^https?:\\/\\/(www\\.)?icloud\\.com\\//i,\n];\n\n// Estas sí se pueden arreglar solas, y son las que una inmobiliaria va a usar\n// de verdad: el link que copia del botón \"Compartir\" apunta a la página, pero\n// el archivo está a un parámetro de distancia.\nconst REPARABLES = [\n  {\n    reconoce: /^https?:\\/\\/drive\\.google\\.com\\/file\\/d\\/([^/?#]+)/i,\n    arregla: (m) => `https://drive.google.com/uc?export=view&id=${m[1]}`,\n  },\n  {\n    reconoce: /^(https?:\\/\\/(?:www\\.)?dropbox\\.com\\/[^?#]+)/i,\n    arregla: (m) => `${m[1]}?raw=1`,\n  },\n  {\n    // El CDN de Unsplash negocia el formato con quien pide: `auto=format` le\n    // sirve AVIF o WebP a cualquiera que los acepte, y WhatsApp solo entiende\n    // JPEG y PNG. Meta acepta el envío, descarga un AVIF y descarta el mensaje\n    // sin decir nada, igual que con una página HTML.\n    //\n    // Cuesta encontrarlo porque un `curl` normal recibe JPEG —no manda el\n    // Accept que dispara la negociación—, así que la URL parece sana.\n    reconoce: /^https?:\\/\\/images\\.unsplash\\.com\\/[^?#]+/i,\n    arregla: (m) => `${m[0]}?w=1080&q=80&fm=jpg`,\n  },\n];\n\n/**\n * URL de imagen de una celda, o null.\n *\n * Devuelve null tanto si no es una URL (\"ver carpeta\", una ruta local) como si\n * es una URL que no va a devolver una imagen. Quien llama trata los dos casos\n * igual: la propiedad no tiene foto.\n */\nfunction celdaUrl(valor) {\n  const texto = celdaTexto(valor);\n  if (!/^https?:\\/\\/\\S+$/i.test(texto)) return null;\n\n  for (const { reconoce, arregla } of REPARABLES) {\n    const encontrado = texto.match(reconoce);\n    if (encontrado) return arregla(encontrado);\n  }\n\n  if (PAGINAS_QUE_NO_SIRVEN_LA_IMAGEN.some((patron) => patron.test(texto))) return null;\n\n  return texto;\n}\n\n// Lógica de src/businessConfig.js\n\n/**\n * Los datos del negocio y las preguntas frecuentes, leídos de la planilla.\n *\n * Por qué esto y no solo el catálogo: si el cliente puede cargar sus\n * propiedades pero no puede cambiar su propia comisión ni su horario, la\n * planilla es media configuración y el resto sigue siendo del desarrollador.\n *\n * El horario vive acá y en un solo lugar. Antes estaba repetido en seis: tres\n * constantes que validaban los turnos y cuatro textos que se lo contaban al\n * cliente. Con la planilla de por medio eso deja de ser una molestia y pasa a\n * ser una contradicción — la inmobiliaria cambia a \"9 a 20\", la FAQ lo dice y\n * el bot igual rechaza un turno a las 19:30. Por eso lo que se carga acá\n * maneja la validación, no solo el texto.\n */\n\n\n// Lo que estaba fijo en el código hasta ahora. Sigue siendo el default: la\n// demo tiene que andar antes de que exista ninguna planilla.\nconst NEGOCIO_POR_DEFECTO = {\n  nombre: 'Inmobiliaria Demo',\n  direccion: 'Av. Colón 1250, Alberdi, Córdoba Capital',\n  telefono: '',\n  logo: null,\n  horaApertura: 9,\n  horaCierre: 19,\n  // null = no se atiende los sábados.\n  horaCierreSabado: 13,\n};\n\nconst DIAS_LABORALES = 'lunes a viernes';\n\n// Alias de las columnas clave/valor de la pestaña \"negocio\".\nconst COLUMNA_CLAVE = ['clave', 'campo', 'dato', 'key'];\nconst COLUMNA_VALOR = ['valor', 'value', 'contenido'];\n\n// Alias de las claves en sí, para que no haya que escribirlas exactas.\nconst CLAVES = {\n  nombre: ['nombre', 'nombre_inmobiliaria', 'agencia'],\n  direccion: ['direccion', 'dirección', 'domicilio'],\n  telefono: ['telefono', 'teléfono', 'tel', 'whatsapp'],\n  logo: ['logo', 'logo_url', 'url_logo'],\n  horaApertura: ['hora_apertura', 'apertura', 'abre'],\n  horaCierre: ['hora_cierre', 'cierre', 'cierra'],\n  horaCierreSabado: ['hora_cierre_sabado', 'hora_cierre_sábado', 'cierre_sabado', 'sabado'],\n};\n\nfunction llave(texto) {\n  return String(texto || '')\n    .normalize('NFD')\n    .replace(/[̀-ͯ]/g, '')\n    .toLowerCase()\n    .trim();\n}\n\nfunction buscarColumna(fila, alias) {\n  const claves = Object.keys(fila || {});\n  for (const nombre of alias) {\n    const clave = claves.find((k) => llave(k) === llave(nombre));\n    if (clave !== undefined) return fila[clave];\n  }\n  return undefined;\n}\n\n/** Las filas clave/valor de la pestaña \"negocio\" a un mapa plano. */\nfunction aMapa(filas) {\n  const mapa = {};\n\n  for (const fila of Array.isArray(filas) ? filas : []) {\n    const clave = llave(buscarColumna(fila, COLUMNA_CLAVE));\n    if (!clave) continue;\n    mapa[clave] = buscarColumna(fila, COLUMNA_VALOR);\n  }\n  return mapa;\n}\n\nfunction primerValor(mapa, alias) {\n  for (const nombre of alias) {\n    const valor = mapa[llave(nombre)];\n    if (valor !== undefined && celdaTexto(valor) !== '') return valor;\n  }\n  return undefined;\n}\n\n/**\n * Hora de atención válida (0 a 24), o el default. Se acepta \"cerrado\" para\n * los sábados, que devuelve null.\n */\nfunction aHora(valor, porDefecto) {\n  const texto = llave(valor);\n  if (texto === 'cerrado' || texto === 'no' || texto === '-') return null;\n\n  const hora = celdaEntero(valor);\n  if (hora === null || hora < 0 || hora > 24) return porDefecto;\n  return hora;\n}\n\n/**\n * @param {Array} filas de la pestaña \"negocio\"\n * @returns {object} config completa: lo que falte en la planilla usa el default\n */\nfunction parsearNegocio(filas) {\n  const mapa = aMapa(filas);\n  const texto = (alias, porDefecto) => celdaTexto(primerValor(mapa, alias)) || porDefecto;\n\n  const apertura = aHora(primerValor(mapa, CLAVES.horaApertura), NEGOCIO_POR_DEFECTO.horaApertura);\n  const cierre = aHora(primerValor(mapa, CLAVES.horaCierre), NEGOCIO_POR_DEFECTO.horaCierre);\n\n  return {\n    nombre: texto(CLAVES.nombre, NEGOCIO_POR_DEFECTO.nombre),\n    direccion: texto(CLAVES.direccion, NEGOCIO_POR_DEFECTO.direccion),\n    telefono: texto(CLAVES.telefono, NEGOCIO_POR_DEFECTO.telefono),\n    logo: texto(CLAVES.logo, '') || null,\n    // Un cierre antes de la apertura dejaría la agencia sin ningún horario\n    // válido y el bot rechazaría todos los turnos sin poder explicar por qué.\n    horaApertura: apertura === null ? NEGOCIO_POR_DEFECTO.horaApertura : apertura,\n    horaCierre: cierre === null || cierre <= apertura ? NEGOCIO_POR_DEFECTO.horaCierre : cierre,\n    horaCierreSabado: aHora(primerValor(mapa, CLAVES.horaCierreSabado), NEGOCIO_POR_DEFECTO.horaCierreSabado),\n  };\n}\n\n/** El horario como se lo cuenta al cliente, desde los mismos números que validan. */\nfunction describirHorarios(negocio) {\n  const config = negocio || NEGOCIO_POR_DEFECTO;\n  const semana = `*${DIAS_LABORALES} de ${config.horaApertura} a ${config.horaCierre} hs*`;\n\n  if (!config.horaCierreSabado) return semana;\n  return `${semana} y los *sábados de ${config.horaApertura} a ${config.horaCierreSabado} hs*`;\n}\n\n/**\n * Completa {{nombre}}, {{direccion}}, {{telefono}} y {{horarios}} dentro de un\n * texto de la planilla. Es lo que hace que cambiar el horario en una celda se\n * propague a todas las respuestas que lo mencionan.\n *\n * Un placeholder desconocido se deja como está: es más fácil de ver en el chat\n * que un hueco en blanco, y le dice al cliente que se equivocó en el nombre.\n */\nfunction resolverPlaceholders(texto, negocio) {\n  const config = negocio || NEGOCIO_POR_DEFECTO;\n  const valores = {\n    nombre: config.nombre,\n    direccion: config.direccion,\n    telefono: config.telefono,\n    horarios: describirHorarios(config),\n  };\n\n  return String(texto || '').replace(/\\{\\{\\s*(\\w+)\\s*\\}\\}/g, (original, clave) => {\n    const valor = valores[llave(clave)];\n    return valor === undefined || valor === '' ? original : valor;\n  });\n}\n\n/**\n * Las filas de la pestaña \"faq\" a entradas como las que espera answerFaq.\n * Se descarta lo que no tenga respuesta: una entrada vacía solo sirve para que\n * el bot conteste con un silencio.\n */\nfunction parsearFaq(filas) {\n  const entradas = [];\n\n  for (const fila of Array.isArray(filas) ? filas : []) {\n    const id = celdaTexto(buscarColumna(fila, ['id', 'clave', 'tema']));\n    const respuesta = celdaTexto(buscarColumna(fila, ['respuesta', 'texto', 'contenido']));\n    if (!id || !respuesta) continue;\n\n    entradas.push({\n      id,\n      pregunta: celdaTexto(buscarColumna(fila, ['pregunta', 'consulta'])),\n      claves: celdaTexto(buscarColumna(fila, ['claves', 'palabras_clave', 'keywords']))\n        .split(/[,\\n|;]+/)\n        .map((c) => c.trim())\n        .filter(Boolean),\n      respuesta,\n    });\n  }\n\n  return entradas;\n}\n\n// <<< END GENERATED >>>\n\n// Arma los dos mensajes de la derivación: el aviso interno al dueño y la\n// respuesta que ve el cliente.\nconst item = $input.first().json;\nconst motivo = item.motivoDerivacion || 'El cliente pidió hablar con una persona';\n\n// El horario sale de la planilla, igual que en el resto de los mensajes: si\n// estuviera escrito acá, la agencia lo cambia en su planilla y este mensaje\n// sigue diciendo el viejo.\nconst negocio = ($('Config Ready').first().json.config || {}).negocio || NEGOCIO_POR_DEFECTO;\nconst agencia = negocio.nombre || item.agencia;\nconst horarios = describirHorarios(negocio).replace(/\\*/g, '');\n\n// Si mandó una nota de voz que no se llegó a transcribir (por ejemplo, porque\n// falló la llamada al modelo), conviene decirlo: el audio está en el chat y el\n// dueño puede escucharlo. Un \"(sin texto)\" haría pensar que no mandó nada.\nconst textoDelMensaje =\n  item.mensaje || (item.esAudio ? '(nota de voz — escuchala en el chat)' : '(sin texto)');\n\nconst mensajeDueno = [\n  '🔔 *Consulta para atender*',\n  '',\n  'Cliente: ' + item.nombreCliente + ' (' + item.telefonoCliente + ')',\n  'Motivo: ' + motivo,\n  '',\n  'Mensaje: \"' + textoDelMensaje + '\"',\n  '',\n  'Respondele directo a ese número por WhatsApp.',\n].join('\\n');\n\nconst respuesta = [\n  'Dale, esto lo ve mejor una persona del equipo 🙌',\n  '',\n  'Ya le pasé tu consulta a un asesor de ' + agencia + '. Te escriben por acá dentro del horario de atención (' + horarios + ').',\n  '',\n  'Si mientras tanto querés que busque propiedades o coordinemos una visita, decime nomás.',\n].join('\\n');\n\n// Telegram no entiende el *negrita* de WhatsApp y los guiones bajos de un\n// mail le rompen el formato, así que va la misma información en texto plano.\nconst mensajeDuenoPlano = mensajeDueno.replace(/\\*/g, '');\n\nreturn [{ json: { ...item, mensajeDueno, mensajeDuenoPlano, respuesta } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -759,8 +759,8 @@
     },
     {
       "parameters": {
-        "content": "## 9. Human handoff\n\nSends two messages: an internal alert to the agency owner with the lead\ndetails, and an acknowledgement to the customer. If the owner notification\nfails, the customer still gets their reply.",
-        "height": 240,
+        "content": "## 9. Human handoff\n\nSends two messages: an internal alert to the agency owner with the lead\ndetails, and an acknowledgement to the customer. If the owner notification\nfails, the customer still gets their reply.\n\nThe WhatsApp alert only reaches the owner if they messaged the business\nnumber in the last 24h — Meta blocks free-form messages outside that window,\nand a handoff alert is exactly when that matters. The Telegram alert has no\nsuch limit and is sent in parallel, so the reply to the customer never waits\non it. Optional: without `TELEGRAM_CHAT_ID` nothing happens.",
+        "height": 420,
         "width": 700,
         "color": 2
       },
@@ -1201,6 +1201,78 @@
       "onError": "continueRegularOutput",
       "notesInFlow": true,
       "notes": "las 3 pestañas de una"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "telegram-configurado",
+              "leftValue": "={{ $env.TELEGRAM_CHAT_ID }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2880,
+        1060
+      ],
+      "name": "Telegram Configured?",
+      "notesInFlow": true,
+      "notes": "Opcional: si no está, no pasa nada"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $env.TELEGRAM_CHAT_ID }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $('Build Handoff Messages').first().json.mensajeDuenoPlano }}"
+            },
+            {
+              "name": "disable_web_page_preview",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3100,
+        1060
+      ],
+      "name": "Notify Owner (Telegram)",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "onError": "continueRegularOutput",
+      "notesInFlow": true,
+      "notes": "No depende de la ventana de 24 hs"
     }
   ],
   "connections": {
@@ -1380,6 +1452,11 @@
         [
           {
             "node": "Notify Owner (WhatsApp)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Telegram Configured?",
             "type": "main",
             "index": 0
           }
@@ -1688,6 +1765,18 @@
             "index": 0
           }
         ]
+      ]
+    },
+    "Telegram Configured?": {
+      "main": [
+        [
+          {
+            "node": "Notify Owner (Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
       ]
     }
   },

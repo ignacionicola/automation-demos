@@ -68,6 +68,7 @@ flowchart TD
 
     G -->|derivar_humano| O[Build Handoff Messages]
     O --> P["Notify Owner (WhatsApp)"]
+    O --> TG{"Telegram configured?"} -->|yes| TG2["Notify Owner (Telegram)"]
     P --> Q[Format Handoff Reply]
 
     I --> R["Send WhatsApp Reply (WhatsApp Cloud)"]
@@ -299,6 +300,8 @@ correct, which didn't seem a good trade for a demo.
 | Owner notification fails | `Notify Owner` continues on error, so the customer still receives their reply. |
 | Reply delivery fails | `Send WhatsApp Reply` retries 3×; the outcome is recorded by `Log Delivery Result`. No alert is attempted over WhatsApp — if WhatsApp is down, that alert would fail too. |
 | Unknown intent reaches the router | The Switch's fallback output routes it to `derivar_humano`. |
+| The owner hasn't messaged the business number in 24h | Meta blocks free-form messages outside that window, which is precisely when a handoff alert matters — there is a customer waiting. The same alert is sent to **Telegram** in parallel, which has no such limit. Optional: without `TELEGRAM_CHAT_ID` nothing is sent and the WhatsApp alert still goes out. |
+| Something fails that nothing anticipated | `error-workflow.json` is an n8n **error workflow**: it names the node that failed, the error, and links to the execution. Set it under the agent's *Settings → Error workflow*. Without it, a 3 AM failure is a line in a log nobody opens. |
 | The LLM call failed, so this message has no entities | `Update Conversation Memory` sits after *both* classifier branches, so a fallback still records the message and keeps the entities gathered earlier — one failed call doesn't wipe the customer's context. |
 | The `whatsapp_conversations` table is missing, or a data table node errors | All three data table nodes are set to continue on error with `alwaysOutputData`, so the flow runs without memory rather than leaving the customer unanswered. Memory is an enhancement, not a dependency — this is also what makes the workflow importable and runnable before the table exists. |
 | `LLM_PROVIDER` set to something unsupported | `Build LLM Request` throws immediately with a clear message — this is a deploy-time misconfiguration, not a per-message failure, so it is surfaced as a failed execution rather than silently guessed at. |
@@ -744,6 +747,7 @@ so open the node's error output rather than trusting the summary line.
 ## Custom Code
 
 ```
+error-workflow.json         n8n error workflow: alerts when the agent fails
 sheets-template/            CSVs for the client's spreadsheet (3 tabs)
 code/
 ├── src/
@@ -765,7 +769,7 @@ code/
 │   ├── sheetCatalog.js         spreadsheet rows -> catalogue entries
 │   ├── businessConfig.js       the negocio/faq tabs, hours and {{placeholders}}
 │   └── catalogSource.js        cache, and the fallback to the bundled JSON
-├── test/                       297 tests, node:test, no dependencies
+├── test/                       304 tests, node:test, no dependencies
 └── scripts/
     ├── build-workflow.js       injects src/ into the workflow's Code nodes
     └── test.js                 runs the suite in the local timezone and in UTC
@@ -773,7 +777,7 @@ code/
 
 ```bash
 cd code
-npm test                  # 297 tests, run twice: local timezone and UTC
+npm test                  # 304 tests, run twice: local timezone and UTC
 npm run test:once         # a single pass, in the local timezone
 npm run build:workflow    # regenerate workflow.json from src/
 npm run check:workflow    # fail if the committed workflow.json is stale

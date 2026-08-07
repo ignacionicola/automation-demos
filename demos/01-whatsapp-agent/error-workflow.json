@@ -1,0 +1,139 @@
+{
+  "name": "01 - WhatsApp Agent - Error Alerts",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [0, 0],
+      "name": "When the Agent Fails"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Qué se rompió, en un mensaje que se pueda leer desde el teléfono.\n//\n// El Error Trigger recibe la ejecución que falló entera. Lo que importa para\n// decidir si hay que levantarse a arreglarlo es: qué workflow, qué nodo, y\n// qué dijo el error — no el stack trace.\nconst entrada = $input.first().json || {};\nconst ejecucion = entrada.execution || {};\nconst workflow = entrada.workflow || {};\nconst error = ejecucion.error || entrada.error || {};\n\nconst nodo = ejecucion.lastNodeExecuted || (error.node && error.node.name) || 'desconocido';\nconst motivo = error.message || error.description || 'sin detalle';\n\n// La URL de la ejecución es lo primero que se quiere abrir, así que va\n// entera y no cortada.\nconst enlace = ejecucion.url || null;\n\nconst mensaje = [\n  '🚨 El agente de WhatsApp falló',\n  '',\n  'Workflow: ' + (workflow.name || 'desconocido'),\n  'Nodo: ' + nodo,\n  'Error: ' + motivo,\n  'Cuándo: ' + new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' }),\n]\n  .concat(enlace ? ['', 'Ver la ejecución: ' + enlace] : [])\n  .join('\\n');\n\nreturn [{ json: { mensaje, nodo, motivo, enlace, workflow: workflow.name || null } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0],
+      "name": "Describe the Failure"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "telegram-configurado",
+              "leftValue": "={{ $env.TELEGRAM_CHAT_ID }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [440, 0],
+      "name": "Telegram Configured?",
+      "notesInFlow": true,
+      "notes": "Sin esto, solo queda en el log"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $env.TELEGRAM_CHAT_ID }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.mensaje }}"
+            },
+            {
+              "name": "disable_web_page_preview",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 0],
+      "name": "Send Alert (Telegram)",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "notesInFlow": true,
+      "notes": "Avisa al que mantiene el bot"
+    },
+    {
+      "parameters": {
+        "content": "## Error alerts for demo 01\n\nn8n runs this workflow whenever the agent's workflow fails. Set it under the\nagent's **Settings → Error workflow**.\n\nWithout it, a failure at 3 AM is a line in an execution log nobody opens —\nand the customer just gets silence. The demo's own error handling covers the\nfailures it can anticipate (a rate-limited LLM, an unreachable calendar); this\ncovers the ones it can't.\n\nIt reuses `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` from the agent. If they\naren't set, nothing is sent and the failure stays in the execution log.",
+        "height": 320,
+        "width": 620,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-40, -420],
+      "name": "Sticky Note — What this is"
+    }
+  ],
+  "connections": {
+    "When the Agent Fails": {
+      "main": [
+        [
+          {
+            "node": "Describe the Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Describe the Failure": {
+      "main": [
+        [
+          {
+            "node": "Telegram Configured?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Configured?": {
+      "main": [
+        [
+          {
+            "node": "Send Alert (Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
