@@ -49,6 +49,27 @@ function toWhatsAppRecipient(numero) {
   return digitos;
 }
 
+/**
+ * El número tal como lo escribió quien configuró la demo, en el formato del
+ * campo `to`: solo dígitos, sin tocar el prefijo de móvil.
+ *
+ * Existe por la diferencia entre un número DERIVADO y uno CONFIGURADO. El del
+ * cliente sale del `wa_id` del webhook y hay que normalizarlo, porque Meta lo
+ * entrega en un formato que su propio endpoint de envío rechaza. El del dueño
+ * lo escribe una persona que está mirando qué número aceptó Meta, así que
+ * "corregírselo" es pisarle una decisión que ella puede verificar y nosotros
+ * no.
+ *
+ * Y el 9 argentino no es opcional de un lado ni del otro: en la lista de
+ * destinatarios de prueba de Meta, `543571684980` y `5493571684980` son dos
+ * entradas distintas, y sirve la que esté cargada. Un número puede necesitar
+ * el 9 y otro no.
+ */
+function comoFueConfigurado(numero) {
+  return soloDigitos(numero);
+}
+
 module.exports = {
   toWhatsAppRecipient,
+  comoFueConfigurado,
 };

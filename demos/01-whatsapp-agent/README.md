@@ -769,7 +769,7 @@ code/
 │   ├── sheetCatalog.js         spreadsheet rows -> catalogue entries
 │   ├── businessConfig.js       the negocio/faq tabs, hours and {{placeholders}}
 │   └── catalogSource.js        cache, and the fallback to the bundled JSON
-├── test/                       304 tests, node:test, no dependencies
+├── test/                       305 tests, node:test, no dependencies
 └── scripts/
     ├── build-workflow.js       injects src/ into the workflow's Code nodes
     └── test.js                 runs the suite in the local timezone and in UTC
@@ -777,7 +777,7 @@ code/
 
 ```bash
 cd code
-npm test                  # 304 tests, run twice: local timezone and UTC
+npm test                  # 305 tests, run twice: local timezone and UTC
 npm run test:once         # a single pass, in the local timezone
 npm run build:workflow    # regenerate workflow.json from src/
 npm run check:workflow    # fail if the committed workflow.json is stale
