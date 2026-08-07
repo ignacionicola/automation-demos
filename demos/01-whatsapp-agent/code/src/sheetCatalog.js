@@ -39,6 +39,16 @@ const COLUMNAS = {
 const OPERACIONES = ['alquiler', 'venta'];
 const TIPOS = ['departamento', 'casa', 'ph', 'local'];
 
+// Un código de propiedad es corto y de una sola pieza: "INM-101", "CASA-7".
+// Pegar una fila entera en la primera celda es un error de carga habitual —
+// Sheets lo acepta sin chistar— y creaba una propiedad fantasma sin ciudad,
+// sin precio y sin foto, que igual competía por un lugar en los resultados.
+const LARGO_MAXIMO_DE_CODIGO = 24;
+
+function esCodigoRazonable(id) {
+  return id.length <= LARGO_MAXIMO_DE_CODIGO && !/[\t\n;|]/.test(id);
+}
+
 /**
  * Convierte un rango de `values:batchGet` —filas como arrays, la primera con
  * los encabezados— en filas como objetos, que es lo que espera todo lo demás.
@@ -143,7 +153,7 @@ function normalizarMoneda(valor) {
  */
 function parsearPropiedad(fila) {
   const id = celdaTexto(valorDe(fila, COLUMNAS.id)).toUpperCase();
-  if (!id) return null;
+  if (!id || !esCodigoRazonable(id)) return null;
 
   const precio = celdaNumero(valorDe(fila, COLUMNAS.precio));
 

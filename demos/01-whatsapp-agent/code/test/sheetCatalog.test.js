@@ -204,3 +204,25 @@ test('el catálogo de la planilla funciona con la búsqueda real', () => {
   assert.ok(resultados.length > 0, 'la planilla tiene que producir resultados');
   assert.strictEqual(resultados[0].id, 'INM-101');
 });
+
+test('una fila pegada dentro de una celda no crea una propiedad', () => {
+  // Error de carga real: se pegó la fila entera en la columna del código.
+  // Sheets lo acepta, y salía una propiedad fantasma sin ciudad, sin precio y
+  // sin foto que igual ocupaba un lugar en los resultados.
+  const pegoteada = 'INM-800\tCASA DE MESSI\tALQUILER\tDEPARTAMENTO\tRÍO TERCERO\tALTO ALEGRE\t8\t8';
+
+  assert.strictEqual(parsearPropiedad({ id: pegoteada }), null);
+
+  const { propiedades, descartadas } = parsearCatalogo([
+    { id: 'INM-800', titulo: 'Casa de Messi' },
+    { id: pegoteada },
+  ]);
+  assert.deepStrictEqual(propiedades.map((p) => p.id), ['INM-800']);
+  assert.strictEqual(descartadas, 1);
+});
+
+test('los códigos normales siguen entrando', () => {
+  for (const id of ['INM-101', 'CASA-7', 'A1', 'REF_2026-014', 'PROP.900']) {
+    assert.ok(parsearPropiedad({ id }), `"${id}" debería ser un código válido`);
+  }
+});
